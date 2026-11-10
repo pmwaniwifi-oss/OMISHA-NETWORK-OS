@@ -1,0 +1,44 @@
+services:
+  gateway:
+    build: ./gateway
+    restart: unless-stopped
+    environment:
+      VALKEY_ADDRESS: valkey:6379
+    ports:
+      - "127.0.0.1:8088:8080"
+    depends_on:
+      valkey:
+        condition: service_healthy
+    networks: [edge]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  worker:
+    build: ./worker
+    restart: unless-stopped
+    environment:
+      VALKEY_ADDRESS: valkey:6379
+    depends_on:
+      valkey:
+        condition: service_healthy
+    networks: [edge]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  valkey:
+    image: valkey/valkey:9.1.2-alpine
+    restart: unless-stopped
+    command: ["valkey-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    networks: [edge]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+networks:
+  edge:
+    internal: true
+
