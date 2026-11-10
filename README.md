@@ -4,6 +4,9 @@ Project planning and installer draft for an integrated ISP platform.
 
 ## Current status
 
+- `docs/cloud-deployment-and-licensing.md`: proposed OMISHA-hosted, per-client cloud and per-user licensing design.
+- `licensing/` and `docker-compose.yml`: development foundation for signed offline license verification and an online activation client. This does not yet enforce Frappe user seats or implement an online license authority. Compose runs only the licensing component, not the full platform.
+
 - `docs/frappe/`: ERPNext/Frappe integration architecture and performance proposal. This is the recommended business-platform direction.
 - `docs/odoo/`: earlier Odoo Community architecture, project proposal, and development backlog. These are alternative planning documents, not an implemented integration.
 - `installer/carrier-core-draft.sh`: previously prepared Carrier Core installer draft integrating NMS Prime and PostgreSQL. It has received static checks only and has not been validated by a Linux installation or end-to-end deployment. Review its prerequisites, credentials handling, and external downloads before use.
