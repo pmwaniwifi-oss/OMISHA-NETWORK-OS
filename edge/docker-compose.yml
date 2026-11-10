@@ -9,7 +9,7 @@ services:
     depends_on:
       valkey:
         condition: service_healthy
-    networks: [edge]
+    networks: [ingress, edge]
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
@@ -39,6 +39,7 @@ services:
       retries: 5
 
 networks:
+  ingress:
   edge:
     internal: true
 

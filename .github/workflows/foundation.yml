@@ -72,4 +72,8 @@ jobs:
           curl --fail http://127.0.0.1:8088/healthz
       - name: Cleanup CI containers
         if: always()
-        run: docker compose -f edge/docker-compose.yml down --volumes
+        run: |
+          docker compose -f edge/docker-compose.yml ps
+          docker compose -f edge/docker-compose.yml logs --tail 50
+          docker compose -f edge/docker-compose.yml down --volumes
+          docker compose down --volumes
