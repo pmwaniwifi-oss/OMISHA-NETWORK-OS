@@ -1,0 +1,11 @@
+# OMISHA overlay; upstream originals remain unchanged beside this file.
+services:
+  frontend:
+    ports:
+      - "127.0.0.1:${OMISHA_ERP_PORT:-8089}:8080"
+    environment:
+      FRAPPE_SITE_NAME_HEADER: ${OMISHA_FRAPPE_SITE:?Set one site for this tenant stack}
+  db:
+    environment:
+      # Upgrades require a backed-up, tested maintenance procedure.
+      MARIADB_AUTO_UPGRADE: !reset null

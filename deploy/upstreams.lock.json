@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "upstreams": [
+    {
+      "name": "frappe",
+      "path": "upstream/frappe",
+      "repository": "frappe/frappe",
+      "commit": "49789a1711d4dde2be9c6888efe35651465f4b64"
+    },
+    {
+      "name": "erpnext",
+      "path": "upstream/erpnext",
+      "repository": "frappe/erpnext",
+      "commit": "495380b59c8701629f25089bd3807e6ddf7f26c6"
+    },
+    {
+      "name": "frappe_docker",
+      "path": "upstream/frappe_docker",
+      "repository": "frappe/frappe_docker",
+      "commit": "adb65c3e6bea083095bb88dc45f589ab37ead072"
+    },
+    {
+      "name": "nms",
+      "path": "upstream/nms",
+      "repository": "cablelabs/os-provisioning",
+      "commit": "117cf48e917681c6c47ba966132c2fbf1e606f4b"
+    }
+  ],
+  "frappe_image": "frappe/erpnext:v16.54.0",
+  "note": "Source pins are review references, not a claim that the prebuilt image was built from these exact commits. Image digest and app compatibility remain release gates."
+}

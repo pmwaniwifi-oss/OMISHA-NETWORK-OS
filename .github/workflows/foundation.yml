@@ -9,6 +9,32 @@ concurrency:
   group: foundation-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  upstream-config:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: python scripts/verify_upstreams.py
+      - name: Validate Frappe configuration without deployment
+        env:
+          OMISHA_STACK: omisha-ci-frappe
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          folder = Path(os.environ['RUNNER_TEMP'])
+          secret = folder / 'frappe-ci-password'
+          secret.write_text('synthetic-ci-value-not-a-runtime-secret')
+          secret.chmod(0o600)
+          (folder / 'frappe-ci.env').write_text('ERPNEXT_VERSION=v16.54.0\nOMISHA_FRAPPE_SITE=ci.localhost\nDB_PASSWORD_SECRETS_FILE=' + str(secret) + '\n')
+          PY
+          export OMISHA_ENV_FILE="$RUNNER_TEMP/frappe-ci.env"
+          bash deploy/frappe/compose.sh config --format json | python scripts/check_frappe_config.py
+          docker manifest inspect frappe/erpnext:v16.54.0 > /dev/null
+          docker manifest inspect mariadb:11.8 > /dev/null
+          docker manifest inspect redis:8.6-alpine > /dev/null
   python:
     runs-on: ubuntu-latest
     timeout-minutes: 10
