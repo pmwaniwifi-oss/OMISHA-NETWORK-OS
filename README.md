@@ -6,6 +6,8 @@ Project planning and installer draft for an integrated ISP platform.
 
 - `docs/cloud-deployment-and-licensing.md`: proposed OMISHA-hosted, per-client cloud and per-user licensing design.
 - `licensing/` and `docker-compose.yml`: development foundation for signed offline license verification and an online activation client. This does not yet enforce Frappe user seats or implement an online license authority. Compose runs only the licensing component, not the full platform.
+- `edge/`: local VM prototype with a Go gateway, Rust worker, and Valkey cache in separate containers. Customer APIs, authentication, NMS/ERP integrations, and actual background jobs are not implemented; it must not be exposed to the internet.
+- `docs/verification-status.md`: current checks and unresolved gaps.
 
 - `docs/frappe/`: ERPNext/Frappe integration architecture and performance proposal. This is the recommended business-platform direction.
 - `docs/odoo/`: earlier Odoo Community architecture, project proposal, and development backlog. These are alternative planning documents, not an implemented integration.
