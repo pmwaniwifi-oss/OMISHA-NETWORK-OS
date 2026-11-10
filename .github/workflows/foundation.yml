@@ -23,6 +23,7 @@ jobs:
       - run: python -m unittest discover -s licensing -p 'test_*.py' -v
       - run: python -m unittest discover -s scripts -p 'test_*.py' -v
       - run: python -m unittest discover -s logging -p 'test_*.py' -v
+      - run: python -m unittest discover -s reporting -p 'test_*.py' -v
   go:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -53,9 +54,13 @@ jobs:
           docker compose -f edge/docker-compose.yml config --quiet
           docker compose build
           docker compose -f edge/docker-compose.yml build
+          docker build -t omisha-reporting-ci reporting
+      - name: Reporting tests inside container
+        run: |
+          docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges --network none --tmpfs /tmp:rw,noexec,nosuid,size=16m -v "$PWD/reporting:/tests:ro" --entrypoint python omisha-reporting-ci -m unittest discover -s /tests -p 'test_*.py' -v
       - name: Licensing tests inside the pinned image
         run: |
-          docker compose run --rm --no-deps -v "$PWD/licensing:/tests:ro" --entrypoint python licensing -m unittest discover -s /tests -p 'test_*.py' -v
+          docker compose run --rm --no-deps --tmpfs /tmp:rw,noexec,nosuid,size=16m -v "$PWD/licensing:/tests:ro" --entrypoint python licensing -m unittest discover -s /tests -p 'test_*.py' -v
       - name: Edge connectivity smoke test
         run: |
           docker compose -f edge/docker-compose.yml up -d --wait --wait-timeout 90

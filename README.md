@@ -22,3 +22,10 @@ The Frappe and Odoo designs are alternative tracks. CRM, helpdesk, HR, accounts,
 
 NMS Prime manages network/subscriber operations; ERPNext and the Frappe ecosystem manage business workflows; Zabbix provides monitoring; a dedicated API serves a Flutter app; PM-WANI uses a role-specific adapter; and n8n handles approved asynchronous workflows. Pin compatible component versions and verify NMS interfaces before implementation.
 
+# Reporting implementation
+
+The [offline reporting pilot](reporting/README.md) now provides reviewed JSON
+templates, deterministic counts/decimal totals, source snapshots and approved CSV
+export. It is not yet an authenticated web portal, email integration, scheduler,
+signature service or government-certified reporting system.
+

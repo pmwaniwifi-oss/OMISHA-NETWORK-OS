@@ -1,0 +1,9 @@
+{
+  "id": "receipts",
+  "version": "v1",
+  "source": "erp-import",
+  "columns": [
+    {"header": "Receipt count", "operation": "count"},
+    {"header": "Receipt total INR", "operation": "sum", "field": "amount"}
+  ]
+}
