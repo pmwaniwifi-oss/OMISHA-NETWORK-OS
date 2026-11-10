@@ -4,6 +4,9 @@ Project planning and installer draft for an integrated ISP platform.
 
 ## Current status
 
+- [Phase 1 implementation](docs/implementation-phase-1.md): read-only environment preflight, hardened license validation/readiness, automated checks and a tested lossless log archive utility.
+- [ISP log storage policy](docs/log-storage-policy.md): preserve complete records with Zstandard compression and exact-byte recovery verification; no automatic deletion or compliance certification.
+
 - `docs/cloud-deployment-and-licensing.md`: proposed OMISHA-hosted, per-client cloud and per-user licensing design.
 - `licensing/` and `docker-compose.yml`: development foundation for signed offline license verification and an online activation client. This does not yet enforce Frappe user seats or implement an online license authority. Compose runs only the licensing component, not the full platform.
 - `edge/`: local VM prototype with a Go gateway, Rust worker, and Valkey cache in separate containers. Customer APIs, authentication, NMS/ERP integrations, and actual background jobs are not implemented; it must not be exposed to the internet.
