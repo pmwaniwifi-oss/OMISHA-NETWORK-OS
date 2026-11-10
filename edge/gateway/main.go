@@ -1,0 +1,79 @@
+package main
+
+import (
+	"bufio"
+	"context"
+	"errors"
+	"fmt"
+	"log"
+	"net"
+	"net/http"
+	"os"
+	"time"
+)
+
+func valkeyPing(ctx context.Context, address string) error {
+	conn, err := (&net.Dialer{Timeout: 2 * time.Second}).DialContext(ctx, "tcp", address)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if err := conn.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		return err
+	}
+	if _, err = conn.Write([]byte("*1\r\n$4\r\nPING\r\n")); err != nil {
+		return err
+	}
+	line, err := bufio.NewReaderSize(conn, 128).ReadString('\n')
+	if err != nil {
+		return err
+	}
+	if line != "+PONG\r\n" {
+		return errors.New("unexpected Valkey response")
+	}
+	return nil
+}
+
+func handler(address string) http.Handler {
+	return handlerWithPing(func(ctx context.Context) error { return valkeyPing(ctx, address) })
+}
+
+func handlerWithPing(ping func(context.Context) error) http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, "{\"status\":\"alive\"}\n")
+	})
+	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if err := ping(r.Context()); err != nil {
+			log.Printf("Valkey readiness failed: %v", err)
+			w.WriteHeader(http.StatusServiceUnavailable)
+			fmt.Fprint(w, "{\"status\":\"unavailable\"}\n")
+			return
+		}
+		fmt.Fprint(w, "{\"status\":\"ready\"}\n")
+	})
+	mux.HandleFunc("/v1/", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "customer API is not implemented", http.StatusNotImplemented)
+	})
+	return mux
+}
+
+func main() {
+	address := os.Getenv("VALKEY_ADDRESS")
+	if address == "" {
+		address = "valkey:6379"
+	}
+	server := &http.Server{
+		Addr:              ":8080",
+		Handler:           handler(address),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
+	}
+	log.Fatal(server.ListenAndServe())
+}
+
