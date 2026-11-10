@@ -2,9 +2,17 @@
 
 Status: development foundation, 10 November 2026. This repository does not yet implement the complete ISP platform or a production cloud service.
 
+## Current deployment target: laptop Linux VM
+
+The first environment will run in a Linux virtual machine on the owner's laptop. Use it for development and a limited pilot, then migrate the same source, images, configuration, and tested backups to an OMISHA self-hosted Linux server. The VM must contain Docker Engine and Compose; the Windows host's Docker daemon is not currently available. Allocate CPU, RAM, and storage after checking the laptop's actual capacity and expected workloads. At the time of the initial check, drives C: and E: each reported roughly 24 GB free, which may constrain images, databases, and backups.
+
+The included Compose file starts only the licensing prototype. ERPNext/Frappe, NMS Prime, Zabbix, n8n, Flutter backend, and PM-WANI adapters are not provided by it. Select and validate VM distribution and component versions before adding them. NMS Prime's previously documented RPM path targets Rocky Linux 9; confirm the supported installation and whether a separate VM is necessary. Configure VM networking and TLS before providing remote client access. Keep backups outside the VM and test recovery. A laptop or a single VM is not a high-availability production cloud.
+
 ## Cloud model
 
-OMISHA operates the central cloud account and controls source repositories, build pipelines, a private image registry, an administrative control plane, monitoring, and backup storage. The existing public GitHub repository is a source mirror; the production source repository and registry should be access-controlled. Client users access the platform over HTTPS. Customers do not need to host source code.
+OMISHA operates a self-hosted Linux server and controls source repositories, build pipelines, an access-controlled image registry, an administrative control plane, monitoring, and backup storage. All project source and build artifacts must be present on that server; the existing public GitHub repository is an additional mirror. The source server, deployment automation, and registry have not yet been provisioned. Client users access the platform over HTTPS. Customers do not need to host source code.
+
+The Linux server needs a supported distribution, administrator-managed access, domain/TLS, sufficient CPU/RAM/storage, backup location, and an agreed network/firewall design. Separate production secrets and license signing keys from the source repository and container images. Keep encrypted backups on a different machine or storage system. A single Linux host is a starting point; service replicas on that host do not protect against host failure.
 
 Deploy each client as an isolated Frappe site with its own database, site files, secrets, tenant identity, and backup/restore policy. Run shared platform services only where tenancy is explicitly enforced. For larger clients, support separate worker pools, database instances, or environments. NMS Prime deployment and integration remain subject to its supported installation model and real API: do not claim the existing Rocky installer is Docker-ready.
 
