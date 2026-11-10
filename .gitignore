@@ -4,4 +4,6 @@ runtime/
 *.license.json
 __pycache__/
 .env
+edge/worker/target/
+edge/gateway/.gocache/
 
