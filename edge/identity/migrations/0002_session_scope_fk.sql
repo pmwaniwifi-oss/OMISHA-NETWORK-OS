@@ -11,4 +11,6 @@ ALTER TABLE sessions
     REFERENCES memberships(membership_id, identity_id, organization_id)
     ON DELETE RESTRICT;
 
+INSERT INTO omisha_schema_migrations (version) VALUES ('0002_session_scope_fk');
+
 COMMIT;
