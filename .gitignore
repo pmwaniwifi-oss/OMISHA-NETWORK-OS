@@ -7,3 +7,4 @@ __pycache__/
 edge/worker/target/
 edge/gateway/.gocache/
 
+edge/identity/secrets/
