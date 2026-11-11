@@ -556,18 +556,18 @@ The client callback is not authoritative for awarding valuable rewards. For rewa
 ### Implementation gates
 
 1. OMISHA owner creates the Google Cloud OAuth app and verifies branding; package ID and signing fingerprints are fixed in the Android release pipeline.
-2. Implement Go-side Google token verification, provider-subject identity mapping, account-linking/recovery, invitation checks, rate limits and audit logs. Add OTP/passkey or company IdP flows as required by account type.
+2. Implement server-side invitation creation/redemption for OMISHA admins, ISP admins and customers, plus Google subject mapping, account recovery, rate limits and audit logs. Do not add OTP/password or another login provider; staff step-up protection must be enforced through the Google/workforce security policy.
 3. Provide the Google social button in the one app. Keep it available to customer, ISP-staff and OMISHA identities, while the server controls membership and may require additional staff MFA.
 4. Define entertainment content rights, moderation, age/consent policy, storage/CDN, retention, and OMISHA AdMob publisher/payee account.
 5. Add AdMob using test IDs only, then test ad callbacks and server-side verification. Move to production ad units only after store/privacy policy and publisher account review.
 6. Measure ad fill, valid impressions, completion, reward fraud, user retention and revenue net of hosting/content costs before scaling.
 
-**Implementation status:** the Flutter shell now has a Google sign-in option and an API exchange contract, but the Go identity endpoint, Google OAuth project/client IDs, authentication verification, AdMob SDK, video/game catalog and monetization ledger are not implemented. Social login and entertainment monetization are not live.
+**Implementation status:** the Flutter shell offers Google as its only sign-in method. Go Google challenge/token exchange and approved-context/session routes exist in source, but invitation create/redeem APIs, membership provisioning, OAuth project configuration, customer self-care/payment, Aadhaar offline verification, AdMob SDK, video/game catalog and monetization ledger are not implemented or live.
 
 
 ## 16. Identity and membership control plane
 
-The existing Go gateway currently returns HTTP 501 for `/v1/*`; it has no authentication endpoint or durable membership source. Do not issue roles from the Flutter client, and do not use Valkey as the identity database.
+The Go gateway now has Google challenge/token exchange and approved-context/session routes in source, backed by an identity-only membership directory. It does not yet create or redeem invitations, provision memberships, or authorize business APIs. Do not issue roles from the Flutter client, and do not use Valkey as the identity database.
 
 ### Minimal identity-only store
 
@@ -579,6 +579,7 @@ The control-plane schema should contain only:
 - provider key plus HMAC-protected external subject lookup (Google `sub`); no raw ID token, Aadhaar, provider access token, customer phone/address, billing data, or copied profile;
 - organization/tenant IDs and display labels needed to render authorized contexts;
 - explicit membership rows (identity, organization, role, status, assignment scope, inviter/approver and timestamps);
+- invitation records (keyed token digest, issuer identity/membership, bound organization, allowed role/scope, recipient binding where applicable, expiry, one-time redemption state and audit timestamps);
 - short-lived session token digests, context scope, expiry and revocation state;
 - server-issued authentication challenge nonce fingerprints and minimal security audit events.
 
@@ -591,10 +592,10 @@ The database must not copy ERPNext Customer/Lead profiles. Customer identity lin
 3. Context activation accepts only a context ID returned by the server and rechecks the live membership row. It returns a short-lived context-scoped access token.
 4. Business endpoints require the scoped token and verify membership plus record ownership/assignment on every call. Tenant DB host/schema credentials are resolved from server-side tenant configuration, never from a request parameter.
 5. Revocation, account suspension, membership removal, or lost device invalidates active token families. Identity tokens and access tokens are stored as hashes in the directory; Valkey is limited to cache/rate limiting and may be flushed without losing accounts.
-6. Staff MFA, customer account recovery, invite expiry, login rate limits, suspicious-attempt controls, deletion/retention, and break-glass support access are server-side policies and audit events.
+6. Google-only sign-in applies to every role. Staff step-up security uses the configured Google/workforce security policy; it is not a separate OTP/password login path. Customer recovery, invitation expiry, login rate limits, suspicious-attempt controls, deletion/retention, and break-glass support access are server-side policies and audit events.
 
 ### Deployment and implementation status
 
 The identity database must run as its own internal-only container with an encrypted volume, separate credentials, backup/restore policy and migrations. It must not be exposed on the laptop/cloud host's public ports. The Go gateway is the only normal application client. This control-plane store is an intentional small directory; it avoids copying business data while enabling one account to hold explicit memberships across multiple ISP tenants and OMISHA workspaces.
 
-**Current status:** the repository contains identity-only PostgreSQL migrations, a composite scope foreign key, a Compose overlay that attaches only the gateway to the internal identity network, a retry-aware migration helper, and Go endpoints for Google challenge issuance and nonce-bound ID-token exchange. The exchange validates the provider token, atomically consumes the challenge, maps a pseudonymous provider subject, and stores an HMAC digest of the short-lived identity session. None of these services or migrations has been run in the local environment. The native Android Credential Manager bridge and Go endpoints have not yet been validated together. OTP delivery/verification, context listing/activation, session revocation, tenant credential routing, business API authorization and cross-tenant controls remain unimplemented. Google identity exchange alone does not grant a workspace or expose customer/staff business data.
+**Current status:** the repository contains identity-only PostgreSQL migrations, a composite scope foreign key, a Compose overlay, a retry-aware migration helper, and Go endpoints for Google challenge/token exchange, approved membership listing, context activation/current-context lookup and session-family logout. Identity exchange validates the provider token, consumes the challenge, maps a pseudonymous subject and stores HMAC digests of short-lived sessions. These changes have not been build/integration validated or applied to a running database. Invitation records/APIs, OMISHA-to-ISP and ISP-to-staff/customer provisioning, customer self-care/payment, Aadhaar offline verification, tenant routing and business authorization remain unimplemented. Google sign-in alone creates no business access.
