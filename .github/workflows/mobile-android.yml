@@ -49,6 +49,33 @@ jobs:
           mkdir -p android
           cp -a "$host_dir/android/." android/
           perl -0pi -e 's/<application\b/<application android:allowBackup="false"/' android/app/src/main/AndroidManifest.xml
+          mkdir -p android/app/src/main/java/com/omisha/omisha_network_app
+          cp android-host/MainActivity.java android/app/src/main/java/com/omisha/omisha_network_app/MainActivity.java
+          python - <<'PY'
+          from pathlib import Path
+
+          candidates = [Path("android/app/build.gradle.kts"), Path("android/app/build.gradle")]
+          gradle_file = next((path for path in candidates if path.exists()), None)
+          if gradle_file is None:
+              raise SystemExit("Generated Android app Gradle file was not found")
+          source = gradle_file.read_text()
+          if "minSdk = flutter.minSdkVersion" in source:
+              source = source.replace("minSdk = flutter.minSdkVersion", "minSdk = 23")
+          elif "minSdkVersion flutter.minSdkVersion" in source:
+              source = source.replace("minSdkVersion flutter.minSdkVersion", "minSdkVersion 23")
+          else:
+              raise SystemExit("Could not safely set Android minSdk to Credential Manager minimum (23)")
+          dependencies = (
+              '    implementation("androidx.credentials:credentials:1.6.0")\\n'
+              '    implementation("androidx.credentials:credentials-play-services-auth:1.6.0")\\n'
+              '    implementation("com.google.android.libraries.identity.googleid:googleid:1.2.0")\\n'
+          )
+          if "androidx.credentials:credentials:1.6.0" not in source:
+              if "dependencies {" not in source:
+                  raise SystemExit("Generated Android app dependencies block was not found")
+              source = source.replace("dependencies {", "dependencies {\\n" + dependencies, 1)
+          gradle_file.write_text(source)
+          PY
 
       - name: Resolve Flutter dependencies
         run: flutter pub get
