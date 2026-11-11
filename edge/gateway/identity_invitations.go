@@ -51,6 +51,16 @@ func (api *googleIdentityAPI) createISPAndOwnerInvitation(w http.ResponseWriter,
 		return
 	}
 	defer tx.Rollback()
+	requestID := r.Header.Get("Idempotency-Key")
+	if !challengeIDPattern.MatchString(requestID) {
+		writeAuthJSON(w, http.StatusBadRequest, map[string]string{"error": "a UUID v4 Idempotency-Key header is required"})
+		return
+	}
+	requestID := r.Header.Get("Idempotency-Key")
+	if !challengeIDPattern.MatchString(requestID) {
+		writeAuthJSON(w, http.StatusBadRequest, map[string]string{"error": "a UUID v4 Idempotency-Key header is required"})
+		return
+	}
 	principal, err := api.authenticateSessionTx(ctx, tx, r, "context")
 	if err != nil {
 		writeAuthJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
@@ -59,6 +69,10 @@ func (api *googleIdentityAPI) createISPAndOwnerInvitation(w http.ResponseWriter,
 	role, orgType, err := activeContextRole(ctx, tx, principal)
 	if err != nil || orgType != "omisha_workspace" || role != "omisha.platform_admin" {
 		writeAuthJSON(w, http.StatusForbidden, map[string]string{"error": "OMISHA administrator access required"})
+		return
+	}
+	if requestAlreadyUsed(ctx, tx, principal.IdentityID, requestID) {
+		writeAuthJSON(w, http.StatusConflict, map[string]string{"error": "Idempotency-Key was already used; request a new invitation"})
 		return
 	}
 	organizationID, err := randomUUID()
@@ -73,7 +87,7 @@ func (api *googleIdentityAPI) createISPAndOwnerInvitation(w http.ResponseWriter,
 		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "ISP registration unavailable"})
 		return
 	}
-	invite, token, err := api.insertInvitation(ctx, tx, principal, organizationID, "isp.owner", invitationDefaultLifetime)
+	invite, token, err := api.insertInvitation(ctx, tx, principal, organizationID, "isp.owner", invitationDefaultLifetime, requestID)
 	if err != nil {
 		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "ISP invitation could not be created"})
 		return
@@ -118,7 +132,11 @@ func (api *googleIdentityAPI) createWorkspaceInvitation(w http.ResponseWriter, r
 		writeAuthJSON(w, http.StatusForbidden, map[string]string{"error": "invitation permission denied"})
 		return
 	}
-	invite, token, err := api.insertInvitation(ctx, tx, principal, principal.OrganizationID.String, body.RoleCode, lifetime)
+	if requestAlreadyUsed(ctx, tx, principal.IdentityID, requestID) {
+		writeAuthJSON(w, http.StatusConflict, map[string]string{"error": "Idempotency-Key was already used; request a new invitation"})
+		return
+	}
+	invite, token, err := api.insertInvitation(ctx, tx, principal, principal.OrganizationID.String, body.RoleCode, lifetime, requestID)
 	if err != nil {
 		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation unavailable"})
 		return
@@ -281,7 +299,7 @@ func (api *googleIdentityAPI) redeemInvitation(w http.ResponseWriter, r *http.Re
 	})
 }
 
-func (api *googleIdentityAPI) insertInvitation(ctx context.Context, tx *sql.Tx, issuer sessionPrincipal, organizationID, roleCode string, lifetime time.Duration) (invitationRow, string, error) {
+func (api *googleIdentityAPI) insertInvitation(ctx context.Context, tx *sql.Tx, issuer sessionPrincipal, organizationID, roleCode string, lifetime time.Duration, requestID string) (invitationRow, string, error) {
 	var invite invitationRow
 	var err error
 	invite.ID, err = randomUUID()
@@ -305,10 +323,10 @@ func (api *googleIdentityAPI) insertInvitation(ctx context.Context, tx *sql.Tx, 
 	_, err := tx.ExecContext(ctx,
 		`INSERT INTO account_invitations
 		 (invitation_id, token_hmac, organization_id, issuer_identity_id, issuer_membership_id,
-		  role_code, scope_json, status, expires_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, '{}'::jsonb, 'pending', $7)`,
+		  issuer_request_id, role_code, scope_json, status, expires_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, '{}'::jsonb, 'pending', $8)`,
 		invite.ID, keyedDigest(api.hmacKey, "account-invitation-token", token),
-		organizationID, issuer.IdentityID, issuer.MembershipID.String, roleCode, invite.ExpiresAt)
+		organizationID, issuer.IdentityID, issuer.MembershipID.String, requestID, roleCode, invite.ExpiresAt)
 	return invite, token, err
 }
 
@@ -349,6 +367,16 @@ func mayInvite(orgType, issuerRole, invitedRole string) bool {
 		}
 	}
 	return false
+}
+
+func requestAlreadyUsed(ctx context.Context, tx *sql.Tx, issuerIdentityID, requestID string) bool {
+	var exists bool
+	err := tx.QueryRowContext(ctx,
+		`SELECT EXISTS (
+			SELECT 1 FROM account_invitations
+			WHERE issuer_identity_id = $1 AND issuer_request_id = $2
+		)`, issuerIdentityID, requestID).Scan(&exists)
+	return err != nil || exists
 }
 
 func validRoleCode(role string) bool {
