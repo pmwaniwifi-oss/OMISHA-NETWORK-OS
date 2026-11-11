@@ -31,6 +31,7 @@ type invitationRow struct {
 	OrganizationType string
 	DisplayLabel   string
 	OrganizationStatus string
+	IssuerMembershipID string
 	RoleCode       string
 	Status         string
 	ExpiresAt      time.Time
@@ -186,13 +187,13 @@ func (api *googleIdentityAPI) redeemInvitation(w http.ResponseWriter, r *http.Re
 	var issuerIdentityID string
 	err = tx.QueryRowContext(ctx,
 		`SELECT v.invitation_id::text, v.organization_id::text, o.organization_type,
-		        o.display_label, o.status, v.role_code, v.status, v.expires_at,
+		        o.display_label, o.status, v.issuer_membership_id::text, v.role_code, v.status, v.expires_at,
 		        v.redeemed_membership_id::text, v.issuer_identity_id::text
 		 FROM account_invitations v JOIN organizations o ON o.organization_id = v.organization_id
 		 WHERE v.token_hmac = $1
 		 FOR UPDATE OF v`, digest).Scan(
 		&invite.ID, &invite.OrganizationID, &invite.OrganizationType, &invite.DisplayLabel,
-		&invite.OrganizationStatus, &invite.RoleCode, &invite.Status, &invite.ExpiresAt,
+		&invite.OrganizationStatus, &invite.IssuerMembershipID, &invite.RoleCode, &invite.Status, &invite.ExpiresAt,
 		&invite.RedeemedMembershipID, &issuerIdentityID)
 	if err != nil {
 		writeAuthJSON(w, http.StatusNotFound, map[string]string{"error": "invitation is unavailable"})
@@ -221,6 +222,10 @@ func (api *googleIdentityAPI) redeemInvitation(w http.ResponseWriter, r *http.Re
 	}
 	if invite.Status != "pending" || invite.OrganizationStatus != "active" || !invite.ExpiresAt.After(time.Now()) {
 		writeAuthJSON(w, http.StatusGone, map[string]string{"error": "invitation is unavailable"})
+		return
+	}
+	if !api.issuerStillAuthorized(ctx, tx, invite) {
+		writeAuthJSON(w, http.StatusForbidden, map[string]string{"error": "invitation issuer access is no longer valid"})
 		return
 	}
 	var emailBound bool
@@ -370,6 +375,35 @@ func mayInvite(orgType, issuerRole, invitedRole string) bool {
 		}
 	}
 	return false
+}
+
+func (api *googleIdentityAPI) issuerStillAuthorized(ctx context.Context, tx *sql.Tx, invite invitationRow) bool {
+	var issuerRole, issuerOrgType, issuerOrgStatus, identityStatus string
+	var approvedAt sql.NullTime
+	var expiresAt sql.NullTime
+	err := tx.QueryRowContext(ctx,
+		`SELECT m.role_code, m.status, m.approved_at, m.expires_at,
+		        o.organization_type, o.status, i.status
+		 FROM memberships m
+		 JOIN organizations o ON o.organization_id = m.organization_id
+		 JOIN identities i ON i.identity_id = m.identity_id
+		 WHERE m.membership_id = $1 AND m.identity_id = $2`,
+		invite.IssuerMembershipID, invite.IssuerIdentityID).
+		Scan(&issuerRole, new(string), &approvedAt, &expiresAt, &issuerOrgType, &issuerOrgStatus, &identityStatus)
+	if err != nil || issuerOrgStatus != "active" || identityStatus != "active" ||
+		approvedAt.Valid == false || (expiresAt.Valid && !expiresAt.Time.After(time.Now())) {
+		return false
+	}
+	var membershipStatus string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT status FROM memberships WHERE membership_id = $1`, invite.IssuerMembershipID).Scan(&membershipStatus); err != nil || membershipStatus != "active" {
+		return false
+	}
+	if issuerOrgType == "omisha_workspace" && issuerRole == "omisha.platform_admin" && invite.RoleCode == "isp.owner" {
+		return true
+	}
+	return issuerOrgType == invite.OrganizationType &&
+		mayInvite(issuerOrgType, issuerRole, invite.RoleCode)
 }
 
 func requestAlreadyUsed(ctx context.Context, tx *sql.Tx, issuerIdentityID, requestID string) bool {
