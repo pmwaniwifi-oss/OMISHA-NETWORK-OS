@@ -9,20 +9,18 @@ One Flutter Android app package serves customer, ISP organization, and OMISHA wo
 - `flutter_secure_storage`: stores the tokens in platform secure storage. The package currently uses Android's secure cryptographic storage; validate device/backup behavior during Android release hardening.
 - `android-host/MainActivity.java` is a small native bridge to Android Credential Manager. The CI workflow generates the Flutter host, copies this bridge, and adds stable AndroidX Credential Manager 1.6.0 plus Google ID 1.2.0 dependencies. Android minSdk is 23. This is still source scaffolding, not a signed/build-ready release.
 
-## Backend API contract required
+## Backend API contract
 
-The Go API/BFF must implement and secure these routes before login can work:
+Google is the only user sign-in provider for customer, ISP and OMISHA staff accounts. There is no OTP, password, or separate role-specific login path in the Android app.
 
-1. `POST /v1/auth/social/google/challenge` with no user-supplied identity. Return a short-lived `challenge_id` and cryptographically random `nonce`; store only its server-keyed fingerprint. Apply IP/device rate limits and single-use expiry.
-2. `POST /v1/auth/social/google` with `challenge_id` and Google `id_token`. Validate Google's signature, issuer, expected server client ID, expiry, and exact nonce claim; atomically consume the matching unexpired challenge before issuing an OMISHA identity session. Never treat a whole Google ID token as globally one-use or trust role/tenant fields from the client.
-3. `POST /v1/auth/challenges` with `identifier`; return a generic `challenge_id` response that does not reveal whether an account exists. The backend decides the allowed verification channel. It must rate-limit requests, make responses indistinguishable for unknown accounts, give codes a short lifetime and one-time use, and redact identifiers/codes from logs.
-4. `POST /v1/auth/challenges/verify` with challenge ID and code; return a short-lived `identity_token`. This token may enumerate only memberships and activate an authorized context; it must not authorize customer, ISP, or platform business data.
-5. `GET /v1/me/contexts` with the identity token; return server-authorized `context_id`, organization/workspace labels, role labels and display capabilities.
-6. `POST /v1/me/contexts/activate` with a context ID returned by step 5; server revalidates membership and returns a short-lived tenant/workspace-scoped `access_token` plus its active context.
-7. `GET /v1/me` with the scoped access token; return only the active workspace profile and capability display data.
-8. `POST /v1/auth/logout`; revoke the identity session and all scoped tokens in its token family; the identity token is sent only as the Authorization bearer, never in the request body.
+1. `POST /v1/auth/social/google/challenge` with no user-supplied identity. Return a short-lived `challenge_id` and cryptographically random `nonce`; store only its server-keyed fingerprint.
+2. `POST /v1/auth/social/google` with `challenge_id`, nonce and Google `id_token`. Validate Google's signature, issuer, expected server client ID, expiry and exact nonce claim; atomically consume the matching challenge before issuing an OMISHA identity session.
+3. `GET /v1/me/contexts` with the identity token; return only approved active memberships.
+4. `POST /v1/me/contexts/activate` with a returned context ID; revalidate live membership and return a scoped access token.
+5. `GET /v1/me` with the scoped token; revalidate active membership and return the active workspace.
+6. `POST /v1/auth/logout`; revoke the identity session and all scoped sessions in that device's session family.
 
-Every business endpoint must independently enforce user, role, tenant and record assignment. Hiding a screen in Flutter is not authorization. A request body cannot select a tenant, role, or capability. Customer, ISP staff, OMISHA workforce, and platform administration must have separate authorization scopes; platform or cross-tenant access is denied by default.
+Google proves account identity; it does not prove that the person is an ISP subscriber, employee, technician or administrator. OMISHA/ISP-approved membership provisioning assigns those workspaces. The app never allows users to grant themselves roles. Every business endpoint must independently enforce tenant, role and record assignment.
 
 ## Session handling
 
@@ -46,7 +44,7 @@ Replace the example HTTPS URL only after the Go API is deployed with TLS and the
 
 ## Verification state
 
-Flutter and Dart SDK were not present in the inspected workspace, so this source package has not been compiled or run. The Go endpoints above are a contract only and are not implemented by the current gateway. A production login, role workspace, mobile onboarding, or Android APK is not yet available.
+Flutter and Dart SDK were not present in the inspected workspace, so this source package has not been compiled or run. The Go Google challenge/token and workspace/session endpoints exist in source but have not been build/integration validated. Membership provisioning, OTP/password login, tenant routing and business APIs are not implemented; no production login, role workspace or signed Android release is available.
 
 
 ## Google social sign-in
