@@ -8,4 +8,4 @@ services:
   db:
     environment:
       # Upgrades require a backed-up, tested maintenance procedure.
-      MARIADB_AUTO_UPGRADE: !reset null
+      MARIADB_AUTO_UPGRADE: ""
