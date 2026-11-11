@@ -54,7 +54,7 @@ class _OmishaAppState extends State<OmishaApp> {
       final token = await _secureStorage.read(key: _sessionKey);
       final identityToken = await _secureStorage.read(key: _identitySessionKey);
       if (token != null && token.isNotEmpty && identityToken != null && identityToken.isNotEmpty) {
-        final restored = await _api!.resumeSession(
+        final restored = await _api.resumeSession(
           accessToken: token,
           identityToken: identityToken,
         );
@@ -89,7 +89,7 @@ class _OmishaAppState extends State<OmishaApp> {
       _error = null;
     });
     try {
-      final challenge = await _api!.startChallenge(identifier);
+      final challenge = await _api.startChallenge(identifier);
       if (!mounted) return challenge;
       setState(() {
         _challengeId = challenge;
@@ -118,7 +118,7 @@ class _OmishaAppState extends State<OmishaApp> {
       _error = null;
     });
     try {
-      final identityToken = await _api!.verifyChallenge(
+      final identityToken = await _api.verifyChallenge(
         challengeId: challenge,
         code: code,
       );
@@ -156,7 +156,7 @@ class _OmishaAppState extends State<OmishaApp> {
       if (googleIdToken == null) {
         throw const ApiException('Google did not return a sign-in token.');
       }
-      final identityToken = await _api!.exchangeGoogleIdToken(googleIdToken);
+      final identityToken = await _api.exchangeGoogleIdToken(googleIdToken);
       await _finishIdentityAuthentication(identityToken);
     } catch (exception) {
       if (!mounted) return;
@@ -168,8 +168,16 @@ class _OmishaAppState extends State<OmishaApp> {
   }
 
   Future<void> _finishIdentityAuthentication(String identityToken) async {
+    final api = _api;
+    if (api == null) {
+      if (mounted) setState(() {
+        _busy = false;
+        _error = 'The sign-in service is not configured.';
+      });
+      return;
+    }
     try {
-      final contexts = await _api!.listContexts(identityToken);
+      final contexts = await api.listContexts(identityToken);
       if (contexts.isEmpty) {
         throw const ApiException('No active account access is assigned to this sign-in.');
       }
@@ -199,7 +207,7 @@ class _OmishaAppState extends State<OmishaApp> {
       _error = null;
     });
     try {
-      final session = await _api!.activateContext(
+      final session = await _api.activateContext(
         identityToken: identityToken,
         context: context,
       );
@@ -230,7 +238,7 @@ class _OmishaAppState extends State<OmishaApp> {
       _error = null;
     });
     try {
-      final contexts = await _api!.listContexts(session.identityToken);
+      final contexts = await _api.listContexts(session.identityToken);
       if (!mounted) return;
       if (contexts.isEmpty) {
         throw const ApiException('No active account access is assigned to this sign-in.');
@@ -250,14 +258,15 @@ class _OmishaAppState extends State<OmishaApp> {
   }
 
   Future<void> _logout() async {
-    final token = _session?.accessToken;
+    final session = _session;
+    final api = _api;
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
-      if (token != null && _api != null) {
-        await _api!.logout(_session!.identityToken);
+      if (session != null && api != null) {
+        await api.logout(session.identityToken);
       }
     } catch (_) {
       // Always clear local credentials; revocation is retried/handled server-side.
