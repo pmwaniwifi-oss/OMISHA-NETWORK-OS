@@ -231,13 +231,26 @@ func (api *googleIdentityAPI) authenticateSessionWith(ctx context.Context, q ses
 	if len(token) < 32 || len(token) > 256 {
 		return principal, errors.New("invalid bearer")
 	}
+	digest := keyedDigest(api.hmacKey, "session-token", token)
+	// Serialize context activation against family logout: if activation starts first,
+	// logout waits and then revokes the newly-created scoped session too.
+	if tx, ok := q.(*sql.Tx); ok {
+		var lockedSessionID string
+		err := tx.QueryRowContext(ctx,
+			`SELECT session_id::text FROM sessions
+			 WHERE token_hmac = $1 AND revoked_at IS NULL AND expires_at > now()
+			 FOR UPDATE`, digest).Scan(&lockedSessionID)
+		if err != nil {
+			return principal, errors.New("invalid or expired session")
+		}
+	}
 	err := q.QueryRowContext(ctx,
 		`SELECT s.session_id::text, s.identity_id::text, s.session_family_id::text,
 		        s.session_kind, s.organization_id::text, s.membership_id::text
 		 FROM sessions s JOIN identities i ON i.identity_id = s.identity_id
 		 WHERE s.token_hmac = $1 AND s.revoked_at IS NULL AND s.expires_at > now()
 		   AND i.status = 'active'`,
-		keyedDigest(api.hmacKey, "session-token", token)).Scan(
+		digest).Scan(
 		&principal.SessionID, &principal.IdentityID, &principal.FamilyID,
 		&principal.Kind, &principal.OrganizationID, &principal.MembershipID)
 	if err != nil || (requiredKind != "" && principal.Kind != requiredKind) {
