@@ -472,3 +472,46 @@ DoT subscriber verification is also authorization/service-specific. The system m
 - UIDAI, Aadhaar Paperless Offline e-KYC: https://uidai.gov.in/en/aadhaar-paperless-offline-e-kyc
 - DoT, Internet Service authorization portal: https://www.eservices.dot.gov.in/internet-service
 - DoT, Unified License conditions (use the clause set applicable to the operator's actual authorization): https://www.dot.gov.in/static/uploads/2025/07/904d5e1d1ff4fa068e5c1462af7875a6.pdf
+
+
+## 14. One Android app with separate account workspaces
+
+OMISHA will ship one Android application package for subscribers, ISP organizations, and OMISHA employees. It will have one shared sign-in entry, then show only the workspaces and actions granted to the authenticated identity. “Customer”, “ISP”, and “OMISHA Staff” may be shown as sign-in hints, but choosing a label in the app never grants that role.
+
+### User groups and boundaries
+
+| App workspace | Example roles | Allowed scope |
+|---|---|---|
+| Customer | Subscriber / household account owner | Own profile, own service requests, bills/payment links, tickets and notifications only |
+| ISP organization | ISP Owner/Admin, Sales, Support, Finance, Field Technician | One contracted ISP tenant; each staff role receives only its assigned module, records and actions |
+| OMISHA workforce | OMISHA Sales, Field Technician, Customer Support, Implementation/Operations | Assigned customer/ISP cases only; no general access to every ISP tenant |
+| OMISHA platform administration | Platform SRE, licensing administrator, security/compliance administrator | Platform operations by separate privileged permission; no routine subscriber browsing |
+
+A person may have more than one legitimate membership (for example, a subscriber who also works for an ISP). The API returns the server-authorized memberships after sign-in. Switching workspace is allowed only among those memberships and must revalidate the selected tenant/context server-side. No role or tenant is trusted from a client-supplied request field.
+
+### Sign-in and authorization
+
+- Customer self-registration uses the approved customer identity/phone verification flow. Staff cannot create or elevate a customer into ISP/OMISHA staff.
+- ISP staff accounts are invited/provisioned by that ISP's authorized administrator and require MFA; ISP organization ownership and admin recovery require a separately audited process.
+- OMISHA employee accounts use company identity/SSO with MFA. Platform-admin access is separately granted, time-bounded where practical, and audited.
+- Use one stable user identity with explicit organization memberships and role assignments. A login is not a tenant, and a user can belong to multiple tenants only through verified membership records.
+- The Go API/BFF authenticates every request and checks role + organization membership + record assignment. The Flutter client only hides unavailable screens; it is never the security boundary.
+- Customer, ISP-staff and OMISHA-staff API scopes are separated. Customer endpoints enforce ownership. Technician endpoints enforce assignment/territory. Sales endpoints expose only assigned pipeline records. Finance endpoints cannot silently alter network state. OMISHA support access to ISP records is case-bound, minimized and audited.
+- Cross-tenant support uses explicit, time-limited, approved break-glass access with reason and immutable audit event. There is no default “OMISHA staff can see all tenants” rule.
+
+### App and data behavior
+
+The single app uses role-aware navigation and feature modules over the same versioned API. Keep tokens in Android Keystore-backed secure storage; revoke sessions on logout, account disable, device loss, or membership removal. Clear tenant-specific local caches when switching context or signing out. Never store Aadhaar source artifacts, payment secrets, or broad subscriber lists on the device. Technician offline mode is limited to encrypted, expiring, non-sensitive assigned-work drafts; payment and identity verification require an approved online or separately certified flow.
+
+The customer web portal and any future staff web portal use the same server authorization model and domain API. Android and web are clients, not separate customer databases. The dedicated Flutter API/BFF remains a planned Go gateway capability; it is not implemented in the current repository.
+
+### Delivery gates
+
+1. Approve identity provider and account-recovery paths for customers, ISP staff, and OMISHA employees.
+2. Implement membership/tenant discovery and server-side authorization before exposing mobile screens or APIs.
+3. Build the app shell, sign-in, context switcher, role-aware navigation and logout/session revocation.
+4. Add customer acquisition and service features; then ISP-admin, sales, support, finance and technician modules by role.
+5. Add OMISHA workforce modules only after assignment-scoped support and audited break-glass controls exist.
+6. Verify with cross-tenant access tests, role-escalation tests, revoked-session tests, device-cache clearing tests and offline-draft expiry tests before pilot.
+
+**Implementation status:** the repository currently has no Flutter/Android source tree or authentication/membership service. This section records the product decision and security contract; it does not claim that the app or logins have been built.
