@@ -54,6 +54,9 @@ func handlerWithPing(ping func(context.Context) error) http.Handler {
 		}
 		fmt.Fprint(w, "{\"status\":\"ready\"}\n")
 	})
+	googleIdentity := newGoogleIdentityAPIFromEnv()
+	mux.HandleFunc("POST /v1/auth/social/google/challenge", googleIdentity.issueGoogleChallenge)
+	mux.HandleFunc("POST /v1/auth/social/google", googleIdentity.exchangeGoogleIDToken)
 	mux.HandleFunc("/v1/", func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "customer API is not implemented", http.StatusNotImplemented)
 	})
