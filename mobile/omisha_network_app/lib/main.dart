@@ -207,10 +207,7 @@ class _OmishaAppState extends State<OmishaApp> {
     });
     try {
       if (token != null && _api != null) {
-        await _api!.logout(
-          accessToken: token,
-          identityToken: _session!.identityToken,
-        );
+        await _api!.logout(_session!.identityToken);
       }
     } catch (_) {
       // Always clear local credentials; revocation is retried/handled server-side.
