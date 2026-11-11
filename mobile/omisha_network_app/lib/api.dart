@@ -187,16 +187,8 @@ class OmishaApi {
     );
   }
 
-  Future<void> logout({
-    required String accessToken,
-    required String identityToken,
-  }) async {
-    await _send(
-      'POST',
-      'v1/auth/logout',
-      token: accessToken,
-      body: {'identity_token': identityToken},
-    );
+  Future<void> logout(String identityToken) async {
+    await _send('POST', 'v1/auth/logout', token: identityToken, body: const {});
   }
 
   Future<Map<String, dynamic>> _send(
