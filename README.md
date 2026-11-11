@@ -4,7 +4,7 @@ Project planning and installer draft for an integrated ISP platform.
 
 ## Current status
 
-- [Git-managed NMS and Frappe baseline](deploy/README.md): pinned upstream source submodules, Frappe Docker pilot configuration and read-only Go adapter libraries. The submodule `upstream/nms` points to CableLabs OS provisioning; it does not by itself identify or validate the user's deployed NMS Prime product/API. Configuration checks are distinct from live integration.
+- [Git-managed NMS and Frappe baseline](deploy/README.md): pinned upstream source submodules, Frappe Docker pilot configuration and read-only Go adapter libraries. The official `nmsprime/nmsprime` repository says it moved to `cablelabs/os-provisioning`; the project pins that source at `117cf48e917681c6c47ba966132c2fbf1e606f4b`. Official docs describe FTTH provisioning via TR-069/RADIUS and a REST/JSON API. The deployed edition/release and API schema still require confirmation; configuration checks are not live integration.
 - [Data ownership and duplicate-data controls](docs/data-ownership-and-minimization.md): one source of truth per fact, stable cross-system references and bounded projections.
 - `apps/omisha_isp/`: initial Frappe app source for service orders and a reference-only transactional outbox. It is not yet packaged into the ERPNext image or installed on a live site.
 
