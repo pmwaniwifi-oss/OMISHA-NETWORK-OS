@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"errors"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -31,6 +30,7 @@ type invitationRow struct {
 	OrganizationID string
 	OrganizationType string
 	DisplayLabel   string
+	OrganizationStatus string
 	RoleCode       string
 	Status         string
 	ExpiresAt      time.Time
@@ -165,13 +165,13 @@ func (api *googleIdentityAPI) redeemInvitation(w http.ResponseWriter, r *http.Re
 	var issuerIdentityID string
 	err = tx.QueryRowContext(ctx,
 		`SELECT v.invitation_id::text, v.organization_id::text, o.organization_type,
-		        o.display_label, v.role_code, v.status, v.expires_at,
+		        o.display_label, o.status, v.role_code, v.status, v.expires_at,
 		        v.redeemed_membership_id::text, v.issuer_identity_id::text
 		 FROM account_invitations v JOIN organizations o ON o.organization_id = v.organization_id
 		 WHERE v.token_hmac = $1
 		 FOR UPDATE OF v`, digest).Scan(
 		&invite.ID, &invite.OrganizationID, &invite.OrganizationType, &invite.DisplayLabel,
-		&invite.RoleCode, &invite.Status, &invite.ExpiresAt,
+		&invite.OrganizationStatus, &invite.RoleCode, &invite.Status, &invite.ExpiresAt,
 		&invite.RedeemedMembershipID, &issuerIdentityID)
 	if err != nil {
 		writeAuthJSON(w, http.StatusNotFound, map[string]string{"error": "invitation is unavailable"})
@@ -198,7 +198,7 @@ func (api *googleIdentityAPI) redeemInvitation(w http.ResponseWriter, r *http.Re
 		writeAuthJSON(w, http.StatusConflict, map[string]string{"error": "invitation is unavailable"})
 		return
 	}
-	if invite.Status != "pending" || !invite.ExpiresAt.After(time.Now()) {
+	if invite.Status != "pending" || invite.OrganizationStatus != "active" || !invite.ExpiresAt.After(time.Now()) {
 		writeAuthJSON(w, http.StatusGone, map[string]string{"error": "invitation is unavailable"})
 		return
 	}
@@ -391,4 +391,3 @@ func insertEnrollmentAudit(ctx context.Context, tx *sql.Tx, actorIdentityID, org
 	return err
 }
 
-var _ io.Reader
