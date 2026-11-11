@@ -35,7 +35,7 @@ The Go gateway returns 503 from Google identity endpoints until database URL, HM
 
 Google public signing keys may need to be fetched or refreshed, so Google social login requires outbound connectivity to Google's key service. Local ISP/NMS operations and the separate offline-license verification design do not rely on this login route.
 
-The gateway has only a small in-process IP rate limiter. Before internet-facing deployment, add a trusted reverse-proxy rate limit or shared Valkey-backed limiter; do not trust arbitrary `X-Forwarded-For` headers. OTP, membership listing, context activation, session revocation, tenant credential routing and business APIs remain unimplemented. Thus successful Google identity exchange alone does not enable a usable customer or staff workspace.
+The gateway has only a small in-process IP rate limiter. Before internet-facing deployment, add a trusted reverse-proxy rate limit or shared Valkey-backed limiter; do not trust arbitrary `X-Forwarded-For` headers. OTP delivery/verification, membership provisioning, tenant credential routing and business APIs remain unimplemented. The source now lists only approved active memberships, revalidates membership on context activation and current-context lookup, issues a scoped context token in the same device session family, and revokes that family on logout. Capabilities are empty and role labels are display-only. Therefore successful Google identity exchange still does not enable a usable customer or staff business workspace. These routes have not been build- or integration-validated.
 
 ## Migration and recovery
 
