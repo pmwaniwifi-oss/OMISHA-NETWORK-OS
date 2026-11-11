@@ -55,6 +55,7 @@ func handlerWithPing(ping func(context.Context) error) http.Handler {
 		fmt.Fprint(w, "{\"status\":\"ready\"}\n")
 	})
 	googleIdentity := newGoogleIdentityAPIFromEnv()
+	operations := &operationsAPI{identity: googleIdentity, integrations: loadTenantIntegrationRegistry()}
 	mux.HandleFunc("POST /v1/auth/social/google/challenge", googleIdentity.issueGoogleChallenge)
 	mux.HandleFunc("POST /v1/auth/social/google", googleIdentity.exchangeGoogleIDToken)
 	mux.HandleFunc("GET /v1/me/contexts", googleIdentity.listMyContexts)
@@ -66,6 +67,9 @@ func handlerWithPing(ping func(context.Context) error) http.Handler {
 	mux.HandleFunc("GET /v1/me/invitations", googleIdentity.listWorkspaceInvitations)
 	mux.HandleFunc("DELETE /v1/me/invitations/{invitationID}", googleIdentity.revokeWorkspaceInvitation)
 	mux.HandleFunc("POST /v1/auth/invitations/redeem", googleIdentity.redeemInvitation)
+	mux.HandleFunc("GET /v1/me/isp/acquisitions/{acquisitionID}", operations.getAcquisition)
+	mux.HandleFunc("GET /v1/me/isp/service-orders/{serviceOrderID}", operations.getServiceOrder)
+	mux.HandleFunc("GET /v1/me/isp/nms/contracts/{number}", operations.getNMSContractReference)
 	mux.HandleFunc("/v1/", func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "customer API is not implemented", http.StatusNotImplemented)
 	})
