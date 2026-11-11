@@ -3,6 +3,11 @@
 -- Application supplies UUIDs and HMAC-SHA-256 pseudonyms using a server-held key.
 BEGIN;
 
+CREATE TABLE omisha_schema_migrations (
+    version TEXT PRIMARY KEY,
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE identities (
     identity_id UUID PRIMARY KEY,
     status TEXT NOT NULL CHECK (status IN ('active', 'suspended', 'deleted')),
@@ -97,5 +102,7 @@ CREATE TABLE security_audit_events (
 CREATE INDEX security_audit_events_time_idx ON security_audit_events(occurred_at);
 CREATE INDEX security_audit_events_actor_idx
     ON security_audit_events(actor_identity_id, occurred_at);
+
+INSERT INTO omisha_schema_migrations (version) VALUES ('0001_identity');
 
 COMMIT;
