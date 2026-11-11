@@ -30,14 +30,18 @@ internet.
 | Go, Rust, Flutter API | No embedded authoritative business database | Use authenticated service APIs and a transactional outbox owned by a database service | Valkey is a disposable cache only; no bills, subscriber authority, signed logs or entitlements live only in Valkey. |
 | Raw ISP logs | Append/archive object/filesystem service | Tenant/date partitions, protected immutable backup | Not a relational write to every database; preserve mandated original records. |
 
-The NMS repository declares PostgreSQL and MariaDB server RPM dependencies and
-multiple Laravel connections. A database host environment variable exists, but
-that alone does not prove every RPM initialization/migration path supports a
-remote Docker database. Do not claim NMS Docker-ready or automatically route all
-its data into one PostgreSQL service until install and restore are validated.
-The application stays on its documented Rocky/RHEL 9 install path; its database
-can be independently containerized only after a staging integration proves the
-installer, roles, extensions, TLS and backup/restore flow.
+The NMS repository declares PostgreSQL 16 and MariaDB server RPM dependencies and
+multiple Laravel connections. Its main PostgreSQL configuration accepts
+`DB_HOST`, and the package pins PostgreSQL major 16. An opt-in PostgreSQL 16
+Compose service is supplied for a same-host Rocky/RHEL install. It uses a
+dedicated bridge, with the host port loopback-bound so the native NMS service can
+reach PostgreSQL at `127.0.0.1:5432`. The RPM dependencies may install
+local PostgreSQL binaries too; disable the local PostgreSQL service only as part
+of a documented, backed-up migration. The Compose file is a configuration starting
+point; RPM setup, roles, schema creation, extensions, TLS and backup/restore have
+not been validated. Do not start it in production before that staging drill.
+NMS optional MariaDB connections remain separate database services where the
+installed NMS features require them.
 
 ## Scale and performance
 

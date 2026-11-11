@@ -35,6 +35,16 @@ jobs:
           docker manifest inspect frappe/erpnext:v16.54.0 > /dev/null
           docker manifest inspect mariadb:11.8 > /dev/null
           docker manifest inspect redis:8.6-alpine > /dev/null
+      - name: Validate isolated NMS PostgreSQL configuration without starting it
+        env:
+          NMS_STACK: omisha-ci-nms
+        run: |
+          export NMS_CI_ENV="$RUNNER_TEMP/nms-ci.env"
+          printf 'NMS_POSTGRES_VERSION=16\nNMS_DB_NAME=nmsprime_ci\nNMS_DB_USER=nmsprime_ci\nNMS_DB_PASSWORD_FILE=%s/nms-ci-password\n' "$RUNNER_TEMP" > "$NMS_CI_ENV"
+          printf 'synthetic-ci-value-not-a-runtime-secret' > "$RUNNER_TEMP/nms-ci-password"
+          chmod 600 "$NMS_CI_ENV" "$RUNNER_TEMP/nms-ci-password"
+          docker compose --env-file "$NMS_CI_ENV" -p "$NMS_STACK" -f deploy/nms-database/compose.yaml config --format json | python scripts/check_nms_db_config.py
+          docker manifest inspect postgres:16-alpine > /dev/null
   python:
     runs-on: ubuntu-latest
     timeout-minutes: 10

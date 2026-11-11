@@ -52,6 +52,13 @@ stronger boundaries need separate VMs and network policy. The fixed site header
 selects the configured site; it is not authentication. Remote access requires an
 authenticated TLS edge and firewall plan before changing localhost bindings.
 
+For NMS, [deploy/nms-database](nms-database/compose.yaml) is a separate opt-in
+PostgreSQL 16 service configuration. Its volume and Compose project are isolated
+from ERPNext and its port is bound to localhost. The source pins PostgreSQL 16
+and Laravel reads `DB_HOST`, but Rocky/RHEL installer behavior, local service
+migration and restore still require staging validation. CI validates rendered
+configuration and image tag only; it never starts this DB.
+
 Production gates: site provisioning and login, compatible HRMS/CRM/Helpdesk and
 India Compliance versions, tax/account configuration, tested backup/restore,
 private signing keys, telemetry, resource limits and disk sizing. These apps are
