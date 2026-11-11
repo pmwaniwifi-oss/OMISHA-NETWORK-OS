@@ -1,6 +1,6 @@
 # OMISHA ISP Operations for Frappe
 
-Initial source foundation: ISP acquisition request, service order, and transactional integration outbox. Install only on a dedicated client Frappe site after building and pinning a custom ERPNext image containing this app. No public customer API or live NMS/payment/identity adapter is included.
+Initial source foundation: ISP acquisition request, service order, technician installation closeout, and transactional reference-only integration outbox. Install only on a dedicated client Frappe site after building and pinning a custom ERPNext image containing this app. No public customer API or live NMS/payment/identity adapter is included.
 
 ## Acquisition request
 
@@ -9,6 +9,16 @@ The ISP Acquisition Request is a shared record for customer self-service and tec
 Consent must be recorded with a receipt reference, selected method, and configured `omisha_consent_policy_version` before submission. The submitted acquisition and consent fields are locked. Verification status and workflow projections are server-controlled. This is an intake data model, not proof that the selected Aadhaar or other identity method is legally approved or technically verified.
 
 The fields intentionally do not hold Aadhaar numbers, raw QR/XML/e-Aadhaar artifacts, OTPs, biometrics, payment credentials, or identity document images. The request may link to one ERPNext Payment Request; it does not copy provider transaction data or payment status. ERPNext Payment Request/Payment Entry remain the payment source of truth. No payment is accepted or confirmed by this app. No service is provisioned or activated.
+
+## Technician fiber installation closeout
+
+The ISP Installation Job is one technician closeout record linked to the canonical ISP Acquisition Request. It records ONT vendor/model/serial, optional WAN MAC and OLT/PON reference, fiber/ONT/optical/WAN-link checks, a measured optical receive-power value, outcome and completion time. It does not store customer profile/payment copies, device-management credentials, subscriber credentials or identity artifacts.
+
+An Installed closeout requires the fiber, power, optical-test and WAN/link checks to pass and an optical reading to be recorded. The code validates a broad recordable range only; it does not define the operator's acceptable optical-power thresholds, which must come from the actual OLT/ONT design and field procedure. Failed/Needs Review closeouts require a failure code and technician note.
+
+Technicians can access only jobs assigned to their own user. ISP Operations Managers and System Managers can review across assignments. Submitting a closeout creates one ISP Integration Event in the same transaction; the event contains only the installation-job and acquisition-request references. No network call occurs in a DocType hook. A separate dispatcher and a verified NMS/ACS/USP contract are still required.
+
+The acquisition must already be submitted and in Payment Confirmed or Installation Pending state before a closeout may be saved. This is source code only; it has not been installed or runtime-validated against Frappe. Do not infer service activation from this closeout alone.
 
 ## Service-order event behavior
 
@@ -25,7 +35,7 @@ After a custom image includes the app, install it with `bench --site <site> inst
 ## Current limitations and release gates
 
 - The app has not been installed or integration-tested against a Frappe site.
-- No customer self-service or technician-facing API/UI, authentication flow, identity-verification adapter, payment provider, refund/reversal flow, NMS provisioning, PM-WANI, GST setup, seat licensing, or approval UI.
+- No customer self-service or public technician mobile API/UI, authentication release, identity-verification adapter, payment provider, refund/reversal flow, NMS/ACS/USP provisioning, PM-WANI, GST setup, seat licensing, or complete approval UI.
 - No outbox worker, dispatch, retry scheduler, or reconciliation job.
 - DoT/UIDAI requirements and consent policy must be confirmed for the operator's actual authorization and identity method before use.
 - `omisha_consent_policy_version` must be set to the approved policy version. A consent reference/checkbox alone does not perform or prove legal identity verification.
