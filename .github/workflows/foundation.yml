@@ -74,11 +74,7 @@ jobs:
           cache: false
       - working-directory: edge/gateway
         run: |
-          go mod tidy
-          echo GO_SUM_BASE64_BEGIN
-          base64 -w0 go.sum
-          echo
-          echo GO_SUM_BASE64_END
+          go mod tidy -diff
           go vet ./...
           go test -race ./...
   containers:

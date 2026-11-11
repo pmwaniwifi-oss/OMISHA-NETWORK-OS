@@ -16,6 +16,18 @@ const (
 	invitationMaximumLifetime = 7 * 24 * time.Hour
 )
 
+func (api *googleIdentityAPI) invitationServiceReady(w http.ResponseWriter, r *http.Request) bool {
+	if api == nil || api.configErr != nil || api.db == nil || len(api.hmacKey) < 32 {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation service is not configured"})
+		return false
+	}
+	if api.limiter == nil || !api.limiter.allow("invitation:"+remoteAddress(r), 30, 10*time.Minute) {
+		writeAuthJSON(w, http.StatusTooManyRequests, map[string]string{"error": "invitation rate limit exceeded"})
+		return false
+	}
+	return true
+}
+
 type invitationRequest struct {
 	RoleCode       string `json:"role_code"`
 	ExpiresInHours int    `json:"expires_in_hours"`

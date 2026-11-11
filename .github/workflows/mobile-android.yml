@@ -73,9 +73,10 @@ jobs:
               '    implementation("com.google.android.libraries.identity.googleid:googleid:1.2.0")\n'
           )
           if "androidx.credentials:credentials:1.6.0" not in source:
-              if "dependencies {" not in source:
-                  raise SystemExit("Generated Android app dependencies block was not found")
-              source = source.replace("dependencies {", "dependencies {\n" + dependencies, 1)
+              if "dependencies {" in source:
+                  source = source.replace("dependencies {", "dependencies {\n" + dependencies, 1)
+              else:
+                  source += "\ndependencies {\n" + dependencies + "}\n"
           gradle_file.write_text(source)
           PY
 
