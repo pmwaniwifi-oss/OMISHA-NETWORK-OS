@@ -319,7 +319,7 @@ func insertSecurityAudit(ctx context.Context, tx *sql.Tx, identityID, event, out
 	_, err := tx.ExecContext(ctx,
 		`INSERT INTO security_audit_events
 		 (actor_identity_id, event_code, outcome, metadata)
-		 VALUES ($1, $2, $3, '{"provider":"google"}'::jsonb)`,
+		 VALUES ($1, $2, $3, '{}'::jsonb)`,
 		identityID, event, outcome)
 	return err
 }
