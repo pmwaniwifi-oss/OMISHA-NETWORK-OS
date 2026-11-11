@@ -60,6 +60,13 @@ class WorkspaceContext {
   }
 }
 
+class GoogleAuthChallenge {
+  const GoogleAuthChallenge({required this.id, required this.nonce});
+
+  final String id;
+  final String nonce;
+}
+
 class ApiSession {
   const ApiSession({
     required this.accessToken,
@@ -144,14 +151,29 @@ class OmishaApi {
     return identityToken;
   }
 
-  Future<String> exchangeGoogleIdToken(String googleIdToken) async {
-    if (googleIdToken.length < 24 || googleIdToken.length > 8192) {
+  Future<GoogleAuthChallenge> startGoogleChallenge() async {
+    final response = await _send('POST', 'v1/auth/social/google/challenge', body: const {});
+    final id = response['challenge_id'];
+    final nonce = response['nonce'];
+    if (id is! String || id.isEmpty || id.length > 200 ||
+        nonce is! String || nonce.length < 32 || nonce.length > 256) {
+      throw const ApiException('The sign-in service returned an invalid challenge.');
+    }
+    return GoogleAuthChallenge(id: id, nonce: nonce);
+  }
+
+  Future<String> exchangeGoogleIdToken({
+    required String googleIdToken,
+    required String challengeId,
+  }) async {
+    if (googleIdToken.length < 24 || googleIdToken.length > 8192 ||
+        challengeId.isEmpty || challengeId.length > 200) {
       throw const ApiException('The Google sign-in response was invalid.');
     }
     final response = await _send(
       'POST',
       'v1/auth/social/google',
-      body: {'id_token': googleIdToken},
+      body: {'challenge_id': challengeId, 'id_token': googleIdToken},
     );
     final identityToken = response['identity_token'];
     if (identityToken is! String ||
