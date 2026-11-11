@@ -214,6 +214,15 @@ class _OmishaAppState extends State<OmishaApp> {
     }
   }
 
+  void _cancelContextPicker() {
+    setState(() {
+      _identityToken = null;
+      _contexts = const [];
+      _challengeId = null;
+      _error = null;
+    });
+  }
+
   String _safeMessage(Object exception) {
     if (exception is ApiException) return exception.message;
     return 'The request could not be completed. Please try again.';
@@ -257,27 +266,21 @@ class _OmishaAppState extends State<OmishaApp> {
       );
     }
     final session = _session;
+    if (_contexts.isNotEmpty && _identityToken != null) {
+      return _ContextPickerPage(
+        contexts: _contexts,
+        error: _error,
+        onSelect: _activateContext,
+        onCancel: _cancelContextPicker,
+        canReturnToWorkspace: _session != null,
+      );
+    }
     if (session != null) {
       return _WorkspacePage(
         contextInfo: session.context,
         error: _error,
         onSwitch: _openContextPicker,
         onLogout: _logout,
-      );
-    }
-    if (_contexts.isNotEmpty && _identityToken != null) {
-      return _ContextPickerPage(
-        contexts: _contexts,
-        error: _error,
-        onSelect: _activateContext,
-        onCancel: () {
-          setState(() {
-            _identityToken = null;
-            _contexts = const [];
-            _challengeId = null;
-            _error = null;
-          });
-        },
       );
     }
     return _SignInPage(
@@ -467,12 +470,14 @@ class _ContextPickerPage extends StatelessWidget {
     required this.error,
     required this.onSelect,
     required this.onCancel,
+    required this.canReturnToWorkspace,
   });
 
   final List<WorkspaceContext> contexts;
   final String? error;
   final Future<void> Function(WorkspaceContext context) onSelect;
   final VoidCallback onCancel;
+  final bool canReturnToWorkspace;
 
   @override
   Widget build(BuildContext context) {
@@ -496,7 +501,10 @@ class _ContextPickerPage extends StatelessWidget {
                 onTap: () => onSelect(workspace),
               ),
             ),
-          TextButton(onPressed: onCancel, child: const Text('Sign out')),
+          TextButton(
+            onPressed: onCancel,
+            child: Text(canReturnToWorkspace ? 'Return to current workspace' : 'Cancel sign-in'),
+          ),
         ],
       ),
     );
