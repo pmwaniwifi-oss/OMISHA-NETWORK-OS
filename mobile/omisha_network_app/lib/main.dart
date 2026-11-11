@@ -26,7 +26,6 @@ class _OmishaAppState extends State<OmishaApp> {
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
   late final OmishaApi? _api;
   String? _configurationError;
-  String? _challengeId;
   String? _identityToken;
   String? _error;
   List<WorkspaceContext> _contexts = const [];
@@ -80,56 +79,6 @@ class _OmishaAppState extends State<OmishaApp> {
     }
     if (!mounted) return;
     setState(() => _busy = false);
-  }
-
-  Future<String> _startChallenge(String identifier) async {
-    if (_api == null) throw const ApiException('The API endpoint is not configured.');
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    try {
-      final challenge = await _api.startChallenge(identifier);
-      if (!mounted) return challenge;
-      setState(() {
-        _challengeId = challenge;
-        _busy = false;
-      });
-      return challenge;
-    } catch (exception) {
-      if (mounted) {
-        setState(() {
-          _busy = false;
-          _error = _safeMessage(exception);
-        });
-      }
-      rethrow;
-    }
-  }
-
-  Future<void> _verifyCode(String code) async {
-    final challenge = _challengeId;
-    if (_api == null || challenge == null) {
-      setState(() => _error = 'Start sign-in again to request a new code.');
-      return;
-    }
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    try {
-      final identityToken = await _api.verifyChallenge(
-        challengeId: challenge,
-        code: code,
-      );
-      await _finishIdentityAuthentication(identityToken);
-    } catch (exception) {
-      if (!mounted) return;
-      setState(() {
-        _busy = false;
-        _error = _safeMessage(exception);
-      });
-    }
   }
 
   Future<void> _signInWithGoogle() async {
@@ -223,7 +172,6 @@ class _OmishaAppState extends State<OmishaApp> {
         _session = session;
         _identityToken = null;
         _contexts = const [];
-        _challengeId = null;
         _busy = false;
       });
     } catch (exception) {
@@ -288,8 +236,7 @@ class _OmishaAppState extends State<OmishaApp> {
         _session = null;
         _identityToken = null;
         _contexts = const [];
-        _challengeId = null;
-        _busy = false;
+          _busy = false;
       });
     }
   }
@@ -364,19 +311,10 @@ class _OmishaAppState extends State<OmishaApp> {
       );
     }
     return _SignInPage(
-      challengeRequested: _challengeId != null,
       googleEnabled: _googleServerClientId.isNotEmpty,
       busy: _busy,
       error: _error,
-      onStartChallenge: _startChallenge,
-      onVerifyCode: _verifyCode,
       onGoogleSignIn: _signInWithGoogle,
-      onStartOver: () {
-        setState(() {
-          _challengeId = null;
-          _error = null;
-        });
-      },
     );
   }
 }
@@ -399,42 +337,18 @@ class _LoadingPage extends StatelessWidget {
       );
 }
 
-class _SignInPage extends StatefulWidget {
+class _SignInPage extends StatelessWidget {
   const _SignInPage({
-    required this.challengeRequested,
     required this.googleEnabled,
     required this.busy,
     required this.error,
-    required this.onStartChallenge,
-    required this.onVerifyCode,
     required this.onGoogleSignIn,
-    required this.onStartOver,
   });
 
-  final bool challengeRequested;
   final bool googleEnabled;
   final bool busy;
   final String? error;
-  final Future<String> Function(String identifier) onStartChallenge;
-  final Future<void> Function(String code) onVerifyCode;
   final Future<void> Function() onGoogleSignIn;
-  final VoidCallback onStartOver;
-
-  @override
-  State<_SignInPage> createState() => _SignInPageState();
-}
-
-class _SignInPageState extends State<_SignInPage> {
-  final _identifierController = TextEditingController();
-  final _codeController = TextEditingController();
-  final _formKey = GlobalKey<FormState>();
-
-  @override
-  void dispose() {
-    _identifierController.dispose();
-    _codeController.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -449,109 +363,44 @@ class _SignInPageState extends State<_SignInPage> {
               child: Card(
                 child: Padding(
                   padding: const EdgeInsets.all(28),
-                  child: Form(
-                    key: _formKey,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                          width: 54,
-                          height: 54,
-                          decoration: BoxDecoration(
-                            color: colors.primary,
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: const Icon(Icons.hub_outlined, color: Colors.white, size: 30),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        width: 54,
+                        height: 54,
+                        decoration: BoxDecoration(
+                          color: colors.primary,
+                          borderRadius: BorderRadius.circular(16),
                         ),
-                        const SizedBox(height: 24),
-                        Text('OMISHA NETWORK OS', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800, letterSpacing: 1)),
-                        const SizedBox(height: 8),
-                        Text('Sign in to your account', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
-                        const SizedBox(height: 8),
-                        const Text('Customer, ISP team and OMISHA staff access is assigned by the server. This app does not let you choose or grant a role.'),
-                        const SizedBox(height: 24),
-                        if (!widget.challengeRequested) ...[
-                          TextFormField(
-                            controller: _identifierController,
-                            keyboardType: TextInputType.emailAddress,
-                            autofillHints: const [AutofillHints.username],
-                            decoration: const InputDecoration(
-                              labelText: 'Mobile number or email',
-                              border: OutlineInputBorder(),
-                              prefixIcon: Icon(Icons.person_outline),
-                            ),
-                            validator: (value) => (value == null || value.trim().length < 5)
-                                ? 'Enter your registered mobile number or email.'
-                                : null,
-                          ),
-                          const SizedBox(height: 16),
-                          SizedBox(
-                            width: double.infinity,
-                            child: OutlinedButton.icon(
-                              onPressed: widget.busy || !widget.googleEnabled
-                                  ? null
-                                  : widget.onGoogleSignIn,
-                              icon: const Icon(Icons.account_circle_outlined),
-                              label: Text(widget.googleEnabled
-                                  ? 'Continue with Google'
-                                  : 'Google sign-in setup required'),
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          SizedBox(
-                            width: double.infinity,
-                            child: FilledButton(
-                              onPressed: widget.busy
-                                  ? null
-                                  : () async {
-                                      if (_formKey.currentState?.validate() ?? false) {
-                                        try {
-                                          await widget.onStartChallenge(_identifierController.text);
-                                        } catch (_) {}
-                                      }
-                                    },
-                              child: const Text('Continue with verification code'),
-                            ),
-                          ),
-                        ] else ...[
-                          const Text('If this account can sign in, a verification code will be sent using its registered method.'),
-                          const SizedBox(height: 16),
-                          TextFormField(
-                            controller: _codeController,
-                            keyboardType: TextInputType.number,
-                            autofillHints: const [AutofillHints.oneTimeCode],
-                            maxLength: 10,
-                            decoration: const InputDecoration(
-                              labelText: 'Verification code',
-                              border: OutlineInputBorder(),
-                              prefixIcon: Icon(Icons.lock_outline),
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          SizedBox(
-                            width: double.infinity,
-                            child: FilledButton(
-                              onPressed: widget.busy
-                                  ? null
-                                  : () => widget.onVerifyCode(_codeController.text),
-                              child: const Text('Verify and continue'),
-                            ),
-                          ),
-                          TextButton(
-                            onPressed: widget.busy ? null : widget.onStartOver,
-                            child: const Text('Use another account'),
-                          ),
-                        ],
-                        if (widget.busy) ...[
-                          const SizedBox(height: 16),
-                          const LinearProgressIndicator(),
-                        ],
-                        if (widget.error != null) ...[
-                          const SizedBox(height: 16),
-                          _InlineError(widget.error!),
-                        ],
+                        child: const Icon(Icons.hub_outlined, color: Colors.white, size: 30),
+                      ),
+                      const SizedBox(height: 24),
+                      Text('OMISHA NETWORK OS', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800, letterSpacing: 1)),
+                      const SizedBox(height: 8),
+                      Text('Sign in with Google', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
+                      const SizedBox(height: 8),
+                      const Text('Customers, ISP users and OMISHA staff all use Google sign-in. Your approved workspaces and access are assigned by OMISHA and your ISP administrator.'),
+                      const SizedBox(height: 24),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: busy || !googleEnabled ? null : onGoogleSignIn,
+                          icon: const Icon(Icons.account_circle_outlined),
+                          label: Text(googleEnabled
+                              ? 'Continue with Google'
+                              : 'Google sign-in setup required'),
+                        ),
+                      ),
+                      if (busy) ...[
+                        const SizedBox(height: 16),
+                        const LinearProgressIndicator(),
                       ],
-                    ),
+                      if (error != null) ...[
+                        const SizedBox(height: 16),
+                        _InlineError(error!),
+                      ],
+                    ],
                   ),
                 ),
               ),
