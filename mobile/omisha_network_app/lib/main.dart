@@ -177,7 +177,6 @@ class _OmishaAppState extends State<OmishaApp> {
       setState(() {
         _identityToken = session.accessToken;
         _contexts = contexts;
-        _session = null;
         _busy = false;
       });
     } catch (exception) {
