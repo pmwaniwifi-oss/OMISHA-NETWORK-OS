@@ -81,6 +81,22 @@ class ISPAcquisitionRequest(Document):
             frappe.throw(_("A consent receipt must be recorded before submission."))
         if self.identity_method == "Not Selected":
             frappe.throw(_("Select an approved identity verification method before submission."))
+
+        enabled_methods = frappe.conf.get("omisha_enabled_identity_methods", [])
+        if isinstance(enabled_methods, str):
+            try:
+                enabled_methods = json.loads(enabled_methods)
+            except json.JSONDecodeError:
+                frappe.throw(_("Configured identity method allowlist must be a JSON array."))
+        if not isinstance(enabled_methods, list) or any(not isinstance(method, str) for method in enabled_methods):
+            frappe.throw(_("Configured identity method allowlist must be a JSON array of method names."))
+        if self.identity_method not in enabled_methods:
+            frappe.throw(_("This identity verification method has not been approved and enabled by the operator."))
+
+        if self.identity_method == "Aadhaar Offline Verification" and frappe.conf.get("omisha_aadhaar_offline_approved") is not True:
+            frappe.throw(_("Aadhaar offline verification is disabled until operator and compliance approval is recorded."))
+        if self.identity_method == "Aadhaar e-KYC" and frappe.conf.get("omisha_aadhaar_ekyc_approved") is not True:
+            frappe.throw(_("Aadhaar e-KYC is disabled until operator and compliance approval is recorded."))
         if self.channel == "Customer Self-Service" and self.consent_method != "Electronic Self-Service":
             frappe.throw(_("Self-service requests require electronic customer consent."))
         if self.channel == "Technician Assisted" and self.consent_method not in {
