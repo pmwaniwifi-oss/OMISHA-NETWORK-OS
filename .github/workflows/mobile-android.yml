@@ -61,6 +61,8 @@ jobs:
           source = gradle_file.read_text()
           if "minSdk = flutter.minSdkVersion" in source:
               source = source.replace("minSdk = flutter.minSdkVersion", "minSdk = 23")
+          elif "minSdkVersion = flutter.minSdkVersion" in source:
+              source = source.replace("minSdkVersion = flutter.minSdkVersion", "minSdkVersion = 23")
           elif "minSdkVersion flutter.minSdkVersion" in source:
               source = source.replace("minSdkVersion flutter.minSdkVersion", "minSdkVersion 23")
           else:
@@ -78,7 +80,12 @@ jobs:
           PY
 
       - name: Resolve Flutter dependencies
-        run: flutter pub get
+        run: |
+          flutter pub get
+          echo PUBSPEC_LOCK_BASE64_BEGIN
+          base64 -w0 pubspec.lock
+          echo
+          echo PUBSPEC_LOCK_BASE64_END
 
       - name: Analyze Dart source
         run: flutter analyze --fatal-infos

@@ -16,6 +16,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          submodules: recursive
       - run: python scripts/verify_upstreams.py
       - name: Validate Frappe configuration without deployment
         env:
@@ -73,6 +74,11 @@ jobs:
           cache: false
       - working-directory: edge/gateway
         run: |
+          go mod tidy
+          echo GO_SUM_BASE64_BEGIN
+          base64 -w0 go.sum
+          echo
+          echo GO_SUM_BASE64_END
           go vet ./...
           go test -race ./...
   containers:
