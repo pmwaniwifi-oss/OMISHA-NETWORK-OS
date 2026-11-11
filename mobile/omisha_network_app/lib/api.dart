@@ -301,7 +301,9 @@ class OmishaApi {
     if (token != null) {
       request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
     }
-    extraHeaders?.forEach(request.headers.set);
+    extraHeaders?.forEach((name, value) {
+      request.headers.set(name, value);
+    });
     if (body != null) {
       request.headers.contentType = ContentType.json;
       request.add(utf8.encode(jsonEncode(body)));
