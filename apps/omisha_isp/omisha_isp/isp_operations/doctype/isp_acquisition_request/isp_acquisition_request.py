@@ -18,6 +18,7 @@ class ISPAcquisitionRequest(Document):
             "consent_policy_version",
             "consent_recorded_at",
             "acquisition_status",
+            "payment_request",
             "sales_order",
             "service_order",
         )
@@ -72,6 +73,20 @@ class ISPAcquisitionRequest(Document):
         })
         if not linked_address:
             frappe.throw(_("Service address must be linked to this Lead."))
+
+        if self.payment_request:
+            payment = frappe.db.get_value(
+                "Payment Request",
+                self.payment_request,
+                ["reference_doctype", "reference_name"],
+                as_dict=True,
+            )
+            if (
+                not payment
+                or payment.reference_doctype != "Sales Order"
+                or payment.reference_name != self.sales_order
+            ):
+                frappe.throw(_("Payment Request must reference this acquisition's ERPNext Sales Order."))
 
         if self.verification_reference and len(self.verification_reference) > 140:
             frappe.throw(_("Verification reference is too long. Store a reference only, never raw identity data."))
