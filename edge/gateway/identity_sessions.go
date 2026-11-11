@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -203,9 +204,11 @@ func (api *googleIdentityAPI) logoutSessionFamily(w http.ResponseWriter, r *http
 		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "logout unavailable"})
 		return
 	}
-	_ = api.db.ExecContext(ctx,
+	if _, err := api.db.ExecContext(ctx,
 		`INSERT INTO security_audit_events (actor_identity_id, event_code, outcome)
-		 VALUES ($1, 'auth.logout', 'success')`, principal.IdentityID)
+			 VALUES ($1, 'auth.logout', 'success')`, principal.IdentityID); err != nil {
+		log.Printf("logout audit event could not be recorded")
+	}
 	writeAuthJSON(w, http.StatusOK, map[string]bool{"logged_out": true})
 }
 

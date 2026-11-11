@@ -267,7 +267,7 @@ func (api *googleIdentityAPI) redeemInvitation(w http.ResponseWriter, r *http.Re
 			return
 		}
 		status := "active"
-		var approvedBy any = issuerIdentityID
+			var approvedBy any = invite.IssuerIdentityID
 		var approvedAt any = time.Now().UTC()
 		if invite.RoleCode == "isp.customer" {
 			// Customer workspace remains pending until identity/serviceability/payment checks complete.
@@ -340,7 +340,7 @@ func (api *googleIdentityAPI) insertInvitation(ctx context.Context, tx *sql.Tx, 
 		organizationID).Scan(&invite.OrganizationType, &invite.DisplayLabel); err != nil {
 		return invite, "", err
 	}
-	_, err := tx.ExecContext(ctx,
+	_, err = tx.ExecContext(ctx,
 		`INSERT INTO account_invitations
 		 (invitation_id, token_hmac, organization_id, issuer_identity_id, issuer_membership_id,
 		  issuer_request_id, role_code, scope_json, status, expires_at)
