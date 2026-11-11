@@ -199,7 +199,7 @@ class _OmishaAppState extends State<OmishaApp> {
     final session = _session;
     if (api == null || session == null) return;
     final roles = session.context.roleLabels;
-    InvitationResult? invitation;
+    late final InvitationResult invitation;
     setState(() {
       _busy = true;
       _error = null;
@@ -371,8 +371,9 @@ class _OmishaAppState extends State<OmishaApp> {
       _error = null;
     });
     try {
-      if (session != null && api != null) {
-        await api.logout(session.identityToken);
+      final identityToken = session?.identityToken ?? _identityToken;
+      if (identityToken != null && api != null) {
+        await api.logout(identityToken);
       }
       try {
         await _googleIdentityChannel.invokeMethod<void>('clearCredentialState');
@@ -582,6 +583,98 @@ class _SignInPage extends StatelessWidget {
   }
 }
 
+class _InvitationAcceptPage extends StatefulWidget {
+  const _InvitationAcceptPage({
+    required this.pending,
+    required this.error,
+    required this.onRedeem,
+    required this.onLogout,
+  });
+
+  final bool pending;
+  final String? error;
+  final Future<void> Function(String token) onRedeem;
+  final VoidCallback onLogout;
+
+  @override
+  State<_InvitationAcceptPage> createState() => _InvitationAcceptPageState();
+}
+
+class _InvitationAcceptPageState extends State<_InvitationAcceptPage> {
+  final _tokenController = TextEditingController();
+
+  @override
+  void dispose() {
+    _tokenController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('OMISHA NETWORK OS'),
+        actions: [
+          IconButton(tooltip: 'Sign out', onPressed: widget.onLogout, icon: const Icon(Icons.logout)),
+        ],
+      ),
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 460),
+              child: Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.pending ? 'Onboarding is pending' : 'Accept your invitation',
+                        style: Theme.of(context).textTheme.headlineSmall,
+                      ),
+                      const SizedBox(height: 12),
+                      Text(widget.pending
+                          ? 'Your customer invitation is recorded. ISP verification, serviceability and payment checks must finish before service access is activated.'
+                          : 'Sign-in is verified. Paste the private invitation token sent by your ISP or OMISHA administrator.'),
+                      const SizedBox(height: 18),
+                      TextField(
+                        controller: _tokenController,
+                        maxLength: 128,
+                        autocorrect: false,
+                        enableSuggestions: false,
+                        decoration: const InputDecoration(
+                          labelText: 'Invitation token',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      if (widget.error != null) ...[
+                        const SizedBox(height: 12),
+                        _InlineError(widget.error!),
+                      ],
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton(
+                          onPressed: _tokenController.text.trim().length < 40
+                              ? null
+                              : () => widget.onRedeem(_tokenController.text),
+                          child: const Text('Accept invitation'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _ContextPickerPage extends StatelessWidget {
   const _ContextPickerPage({
     required this.contexts,
@@ -635,12 +728,14 @@ class _WorkspacePage extends StatelessWidget {
     required this.error,
     required this.onSwitch,
     required this.onLogout,
+    required this.onCreateInvitation,
   });
 
   final WorkspaceContext contextInfo;
   final String? error;
   final VoidCallback onSwitch;
   final VoidCallback onLogout;
+  final VoidCallback? onCreateInvitation;
 
   @override
   Widget build(BuildContext context) {
@@ -695,6 +790,17 @@ class _WorkspacePage extends StatelessWidget {
                   subtitle: Text(capability),
                 ),
               ),
+          if (onCreateInvitation != null) ...[
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: onCreateInvitation,
+                icon: const Icon(Icons.person_add_alt_1),
+                label: const Text('Create invitation'),
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
           const Text('Screens and actions are only a user interface. The OMISHA API must enforce every permission and tenant boundary on every request.'),
         ],
