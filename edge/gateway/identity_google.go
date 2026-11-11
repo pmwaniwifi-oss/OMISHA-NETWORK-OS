@@ -88,8 +88,9 @@ func (api *googleIdentityAPI) issueGoogleChallenge(w http.ResponseWriter, r *htt
 		writeAuthJSON(w, http.StatusTooManyRequests, map[string]string{"error": "try again later"})
 		return
 	}
-	if r.Body != nil {
-		_ = r.Body.Close()
+	if err := requireEmptyJSONBody(w, r); err != nil {
+		writeAuthJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid sign-in request"})
+		return
 	}
 	nonceBytes := make([]byte, 32)
 	if _, err := rand.Read(nonceBytes); err != nil {
@@ -118,6 +119,22 @@ func (api *googleIdentityAPI) issueGoogleChallenge(w http.ResponseWriter, r *htt
 		"challenge_id": challengeID,
 		"nonce":        nonce,
 	})
+}
+
+func requireEmptyJSONBody(w http.ResponseWriter, r *http.Request) error {
+	r.Body = http.MaxBytesReader(w, r.Body, 1024)
+	defer r.Body.Close()
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	var body struct{}
+	if err := decoder.Decode(&body); err != nil {
+		return err
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return errors.New("request must contain one JSON object")
+	}
+	return nil
 }
 
 type googleExchangeRequest struct {
