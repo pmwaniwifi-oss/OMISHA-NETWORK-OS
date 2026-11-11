@@ -5,6 +5,8 @@ Project planning and installer draft for an integrated ISP platform.
 ## Current status
 
 - [Git-managed NMS Prime and Frappe baseline](deploy/README.md): pinned upstream source submodules, Frappe Docker pilot configuration and read-only Go adapter libraries. Configuration/contract tests are distinct from live integration. NMS Prime retains its supported Rocky Linux deployment boundary.
+- [Data ownership and duplicate-data controls](docs/data-ownership-and-minimization.md): one source of truth per fact, stable cross-system references and bounded projections.
+- `apps/omisha_isp/`: initial Frappe app source for service orders and a reference-only transactional outbox. It is not yet packaged into the ERPNext image or installed on a live site.
 
 - [Phase 1 implementation](docs/implementation-phase-1.md): read-only environment preflight, hardened license validation/readiness, automated checks and a tested lossless log archive utility.
 - [ISP log storage policy](docs/log-storage-policy.md): preserve complete records with Zstandard compression and exact-byte recovery verification; no automatic deletion or compliance certification.
@@ -27,7 +29,7 @@ NMS Prime manages network/subscriber operations; ERPNext and the Frappe ecosyste
 # Reporting implementation
 
 The [offline reporting pilot](reporting/README.md) now provides reviewed JSON
-templates, deterministic counts/decimal totals, source snapshots and approved CSV
+templates, streaming NDJSON aggregation, source references/digests and approved CSV
 export. It is not yet an authenticated web portal, email integration, scheduler,
 signature service or government-certified reporting system.
 

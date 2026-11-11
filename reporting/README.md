@@ -9,15 +9,15 @@ must explicitly define what a row represents. Importer completeness and financia
 reconciliation remain operator responsibilities.
 
 Run with Python 3.12; no third-party dependency or network service is needed.
-Use a private directory (0700) and umask 077. SQLite stores source snapshots in
-plaintext: keep its volume encrypted and backed up. Do not commit the database,
+Use a private directory (0700) and umask 077. SQLite stores report values and
+source references in plaintext: keep its volume encrypted and backed up. Do not commit the database,
 exports, actual email attachments, signatures or customer records to public GitHub.
 
 ```bash
 umask 077
 mkdir -p runtime/reporting
 python reporting/report_engine.py --db runtime/reporting/pilot.db --tenant demo approve-template --file reporting/template.example.json --actor operator
-python reporting/report_engine.py --db runtime/reporting/pilot.db --tenant demo generate --template receipts --version v1 --start 2026-10-01 --end 2026-10-31 --records reporting/records.example.json
+python reporting/report_engine.py --db runtime/reporting/pilot.db --tenant demo generate --template receipts --version v1 --start 2026-10-01 --end 2026-10-31 --records reporting/records.example.ndjson
 # Copy the printed run ID into RUN_ID; inspect before approving.
 python reporting/report_engine.py --db runtime/reporting/pilot.db --tenant demo show --run "$RUN_ID"
 python reporting/report_engine.py --db runtime/reporting/pilot.db --tenant demo approve --run "$RUN_ID" --actor operator --confirmed-count 2
@@ -26,10 +26,12 @@ python -m unittest discover -s reporting -p 'test_*.py' -v
 ```
 
 Expected sample output: count 2 and total 300.30. Data is synthetic. Do not submit
-it to any authority. JSON files are limited to 16 MiB and imports to 100,000 rows;
-the engine is a pilot, not an IPDR analytics engine. Source records are retained
-inside each run for provenance; this duplicates data and is unsuitable for large
-raw-log datasets. Later adapters should use controlled snapshots and archive refs.
+it to any authority. Templates and NDJSON input are limited to 16 MiB, each line
+to 1 MiB and imports to 100,000 rows; the engine is a pilot, not an IPDR analytics
+engine. NDJSON rows are parsed and aggregated one at a time. Input rows are not
+copied into report runs. Persisted provenance contains source system,
+record ID, date and an input hash; the source transaction stays in its owning
+system. Later adapters should query bounded aggregates and retain archive refs.
 
 A Dockerfile is included for the same offline CLI. It opens no ports and has no
 runtime network requirement. Build with `docker build -t omisha-reporting reporting`.

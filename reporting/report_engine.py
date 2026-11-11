@@ -109,10 +109,14 @@ class Engine:
         if not template_row:
             raise ReportError("approved template not found for tenant")
         template = json.loads(template_row['body'])
-        if not isinstance(records, list) or len(records) > 100000:
-            raise ReportError("records must be a bounded list")
-        selected, seen = [], set()
+        selected_refs, selected_hashes, seen = [], [], set()
+        sums = {column['field']: Decimal(0) for column in template['columns']
+                if column['operation'] == 'sum'}
+        selected_count = input_count = 0
         for record in records:
+            input_count += 1
+            if input_count > 100000:
+                raise ReportError("record count exceeds 100000")
             if not isinstance(record, dict) or record.get('tenant_id') != tenant:
                 raise ReportError("tenant mismatch")
             if record.get('source') != template['source']:
@@ -123,31 +127,36 @@ class Engine:
             seen.add(rid)
             when = iso_date(record.get('date'))
             if first <= when <= last:
-                selected.append(record)
-        selected.sort(key=lambda record: record['id'])
+                selected_count += 1
+                selected_refs.append({'source': record['source'], 'id': rid, 'date': record['date']})
+                selected_hashes.append(digest(record))
+                for field in sums:
+                    raw = record.get(field)
+                    # Decimal strings avoid float rounding and ambiguous separators.
+                    if not isinstance(raw, str) or not re.fullmatch(r"-?\d{1,16}(\.\d{1,6})?", raw):
+                        raise ReportError("missing or invalid decimal field: " + field)
+                    try:
+                        sums[field] += Decimal(raw)
+                    except InvalidOperation as exc:
+                        raise ReportError("invalid decimal") from exc
         values = []
         for column in template['columns']:
             if column['operation'] == 'count':
-                values.append(str(len(selected)))
+                values.append(str(selected_count))
                 continue
-            total = Decimal(0)
-            for record in selected:
-                raw = record.get(column['field'])
-                # Decimal strings avoid floating point rounding and ambiguous separators.
-                if not isinstance(raw, str) or not re.fullmatch(r"-?\d{1,16}(\.\d{1,6})?", raw):
-                    raise ReportError("missing or invalid decimal field: " + column['field'])
-                try:
-                    total += Decimal(raw)
-                except InvalidOperation as exc:
-                    raise ReportError("invalid decimal") from exc
-            values.append(format(total, 'f'))
+            values.append(format(sums[column['field']], 'f'))
+        selected_refs.sort(key=lambda record: record['id'])
+        selected_hashes.sort()
         body = {
             'tenant_id': tenant, 'template': template,
             'template_approved_by': template_row['approved_by'],
             'period': {'start': start, 'end': end, 'bounds': 'inclusive'},
-            'values': values, 'record_count': len(selected),
-            'source_records': selected, 'source_sha256': digest(selected),
-            'warnings': [] if selected else ['No matching records; confirm completeness'],
+            'values': values, 'record_count': selected_count,
+            # Keep source transactions in their owning system; persist references only.
+            'source_records': selected_refs,
+            'source_sha256': digest(selected_hashes),
+            'source_reference_sha256': digest(selected_refs),
+            'warnings': [] if selected_count else ['No matching records; confirm completeness'],
         }
         run_id = digest(body)
         with self.db:
@@ -161,7 +170,7 @@ class Engine:
         if not row:
             raise ReportError("report not found for tenant")
         body = json.loads(row['body'])
-        if digest(body) != row['id'] or digest(body['source_records']) != body['source_sha256']:
+        if digest(body) != row['id'] or digest(body['source_records']) != body['source_reference_sha256']:
             raise ReportError("report integrity mismatch")
         return {'id': row['id'], 'status': row['status'], 'approved_by': row['approved_by'],
                 'created_at': row['created_at'], 'report': body}
@@ -208,6 +217,43 @@ def read_json(path):
     return json.loads(raw, object_pairs_hook=pairs, parse_constant=invalid)
 
 
+def read_records(path):
+    """Stream bounded NDJSON records; don't parse a whole report into RAM."""
+    source = Path(path)
+    if source.stat().st_size > 16 * 1024 * 1024:
+        raise ReportError("records file exceeds 16 MiB")
+    count = 0
+    with source.open('rb') as stream:
+        for line_number, raw in enumerate(stream, 1):
+            if len(raw) > 1024 * 1024:
+                raise ReportError("record line exceeds 1 MiB")
+            if not raw.strip():
+                continue
+            count += 1
+            if count > 100000:
+                raise ReportError("record count exceeds 100000")
+            record = read_json_line(raw, line_number)
+            if not isinstance(record, dict):
+                raise ReportError("each NDJSON line must contain one object")
+            yield record
+
+
+def read_json_line(raw, line_number):
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                raise ReportError("duplicate JSON key on record line " + str(line_number))
+            result[key] = value
+        return result
+    def invalid(_):
+        raise ReportError("nonfinite JSON value on record line " + str(line_number))
+    try:
+        return json.loads(raw, object_pairs_hook=pairs, parse_constant=invalid)
+    except json.JSONDecodeError as exc:
+        raise ReportError("invalid JSON on record line " + str(line_number)) from exc
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--db', required=True, help='Private operator-owned SQLite path')
@@ -233,7 +279,7 @@ def main():
             print('Template approved for offline pilot')
         elif args.command == 'generate':
             print(engine.generate(args.tenant, args.template, args.version, args.start,
-                                  args.end, read_json(args.records)))
+                                  args.end, read_records(args.records)))
         elif args.command == 'approve':
             engine.approve(args.tenant, args.run, args.actor, args.confirmed_count)
             print('Approved; not signed or submitted')

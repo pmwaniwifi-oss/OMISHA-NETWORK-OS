@@ -1,0 +1,2 @@
+recursive-include omisha_isp *.json *.js *.css
+include README.md
