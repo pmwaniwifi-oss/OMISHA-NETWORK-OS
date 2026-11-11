@@ -8,7 +8,7 @@ The ISP Acquisition Request is a shared record for customer self-service and tec
 
 Consent must be recorded with a receipt reference, selected method, and configured `omisha_consent_policy_version` before submission. The submitted acquisition and consent fields are locked. Verification status and workflow projections are server-controlled. This is an intake data model, not proof that the selected Aadhaar or other identity method is legally approved or technically verified.
 
-The fields intentionally do not hold Aadhaar numbers, raw QR/XML/e-Aadhaar artifacts, OTPs, biometrics, payment credentials, or identity document images. No payment is accepted or confirmed by this app. No service is provisioned or activated.
+The fields intentionally do not hold Aadhaar numbers, raw QR/XML/e-Aadhaar artifacts, OTPs, biometrics, payment credentials, or identity document images. The request may link to one ERPNext Payment Request; it does not copy provider transaction data or payment status. ERPNext Payment Request/Payment Entry remain the payment source of truth. No payment is accepted or confirmed by this app. No service is provisioned or activated.
 
 ## Service-order event behavior
 
