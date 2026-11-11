@@ -13,7 +13,7 @@ PM-WANI session authentication, authorization, accounting, hotspot control, and 
 
 GST and regulatory reports should be generated from controlled source transactions, reviewed, and reconciled. This design does not decide which telecom reports apply to the company. The entity's authorization, service footprint, customer types, filing channels, and retention rules must be confirmed with its compliance owner and advisor.
 
-The workspace currently contains no application source code. This document is therefore the reviewable first deliverable; implementation should start after the open decisions in Section 12 are answered and the NMS Prime interface is identified.
+The repository now includes a limited source foundation (Frappe ISP service-order/outbox skeleton, read-only Go adapters, report streaming, and deployment references). It is not a complete product or production deployment. The acquisition and provisioning workflow below remains a design contract until implemented and validated against the operator's authorization, payment provider, and NMS edition.
 
 ## 2. Goals and boundaries
 
@@ -390,3 +390,85 @@ The diagram shows logical workloads, not a mandate to run every database in one 
 - Rust official language book: https://doc.rust-lang.org/stable/book/ch00-00-introduction.html
 
 
+
+
+## 13. Customer acquisition and automated onboarding
+
+Customer acquisition has two entry channels and one shared workflow. A self-service customer and a technician-assisted customer must not create separate customer masters or bypass the same eligibility, identity, payment, approval, and provisioning state machine.
+
+### Channel A: customer self-registration
+
+1. Customer signs up on the branded web portal or Flutter customer app using verified mobile/email and chooses an available plan.
+2. The Go customer API checks serviceability for the requested address using the approved coverage source. It creates or resumes a single ERPNext Lead/Prospect using a channel idempotency key and duplicate-candidate checks. Similar phone/name matches are review candidates, not automatic merges. Aadhaar number is never the customer deduplication key.
+3. The portal explains the applicable identity process, purpose, fields, retention and alternatives in Hindi and English, obtains and records consent, and starts the operator-approved subscriber verification route.
+4. If Aadhaar offline verification is legally available for the operator and method, validate the supported digitally signed QR/e-Aadhaar/offline XML or other currently approved credential. Store the verification outcome, method, timestamp, consent receipt, verifier version, and minimal reference/masked attributes only. Do not persist the full Aadhaar number, raw QR payload, XML, share phrase, OTP, biometric, or full document image in normal application tables, logs, analytics or Git. Delete temporary artifacts after verification unless an explicit, lawful retention rule requires otherwise.
+5. If the customer chooses or needs an alternative, route to the configured accepted document/manual verification path. Do not make Aadhaar the only path unless the operator's legal/compliance owner confirms the exact basis and process.
+6. Customer pays through a payment provider's hosted/approved flow. OMISHA stores provider transaction reference, amount, currency, status and signed webhook/event ID. Never collect/store card number, UPI PIN, CVV or payment credentials. A browser success redirect or screenshot is not payment proof.
+7. Payment webhook signature and amount/order match are verified server-side. The provider event ID and order idempotency key prevent duplicate payment posting. ERPNext owns the Sales Order/invoice/payment allocation; repeated webhook deliveries reconcile to the same transaction rather than create another entry.
+8. A common service order advances only when required identity checks, serviceability, terms, and payment/credit policy are satisfied. It then enters survey/installation or the configured no-install service path. Service activation waits for the approved network integration's acknowledgement and an end-to-end service test.
+
+### Channel B: technician-assisted registration
+
+1. A technician signs in to the technician Flutter app or responsive portal with a separate workforce identity, MFA, assigned territory/role, and device/session controls.
+2. The technician creates or resumes the same ERPNext Lead/Prospect and service order through the same Go API. The source channel and assigned technician ID are audit metadata; customer, plan and identity records are not copied to a technician-only database.
+3. Customer consent and verification use the same approved methods and requirements as self-service. A technician may assist with capture/verification only where the chosen method and operator policy permit it; the technician cannot mark a failed or absent check as verified.
+4. If connectivity is unavailable, the app may queue only a short-lived encrypted draft of non-sensitive order fields, with local access controls and explicit expiry. It must not queue raw Aadhaar files, biometrics, OTPs, payment secrets or identity payloads for later background sync. Identity proof and payment must be verified online or via a separately approved offline process before activation.
+5. Installation evidence is limited to the assigned order: equipment serial/MAC, checklist, completion timestamp, and customer acknowledgement. Location/photo collection is purpose-limited, consented where required, access-controlled and retention-bounded.
+6. The order follows the same server-side state machine as self-registration. Technician completion is evidence for the workflow; it does not directly change NMS state, create a payment, or bypass finance/compliance checks.
+
+### Shared state machine and service roles
+
+```mermaid
+stateDiagram-v2
+  [*] --> Prospect
+  Prospect --> ServiceabilityCheck
+  ServiceabilityCheck --> IdentityPending
+  ServiceabilityCheck --> NotServiceable
+  IdentityPending --> IdentityVerified
+  IdentityPending --> ManualReview
+  IdentityPending --> AlternativeVerification
+  AlternativeVerification --> IdentityVerified
+  ManualReview --> IdentityVerified
+  IdentityVerified --> PaymentPending
+  PaymentPending --> Paid
+  Paid --> InstallationPending
+  InstallationPending --> Installed
+  Installed --> ProvisioningPending
+  ProvisioningPending --> Active
+  ProvisioningPending --> ProvisioningReview
+```
+
+The state machine is owned by the server-side ISP Operations app. Every transition records actor/service identity, timestamp, correlation ID, policy/version, and idempotency key. Customer, technician, finance/reconciliation, compliance reviewer, installer, and integration worker have distinct permissions. A tenant is resolved from the authenticated client/site connection; a client-supplied tenant field never grants access. Suspended, cancelled, refunded, rejected and manual-review branches must be implemented before live billing/provisioning.
+
+### System ownership and integration boundary
+
+- ERPNext owns the Lead/Customer, Sales Order, invoice, payment posting and GST accounting. Convert prospect to Customer once according to configured conversion policy.
+- The ISP Operations app owns the acquisition/service-order state machine and cross-system correlation IDs; it keeps verification references and workflow events, not duplicate customer/payment profiles.
+- The identity verification adapter returns a bounded decision and reference. It must not expose raw Aadhaar artifacts to Go logs, n8n, Zabbix, analytics or the NMS.
+- The payment provider owns payment credentials and payment authorization. ERPNext stores financial transaction records; the integration layer stores provider references and webhook replay keys.
+- NMS Prime remains owner of the network contract/service and device/topology state. Its generic Contract create/update endpoints exist, but replay safety and side effects are not established. Do not auto-provision from either acquisition channel until the NMS write contract and idempotency/reconciliation are approved.
+- Zabbix receives operational monitoring identifiers only after provisioning; it is not a customer-registration or identity store.
+- PM-WANI onboarding/session/token operations are routed to the authorized PM-WANI role/provider; the ISP subscriber flow must not fabricate or duplicate PM-WANI authentication/session records.
+
+### Aadhaar and telecom compliance gates
+
+“Offline Aadhaar verification” and “UIDAI authentication” are different methods. Offline verification validates an Aadhaar holder-provided, digitally signed artifact without calling CIDR for a live yes/no authentication response. UIDAI regulations require notice and consent, purpose limitation, consent records, and viable alternatives in applicable circumstances. Before enabling any Aadhaar route, the operator must confirm the entity's eligibility/registration (including whether OVSE registration applies to the selected verification method), exact UIDAI technical specifications, consent text, artifact disposal, and legal basis with its compliance adviser.
+
+DoT subscriber verification is also authorization/service-specific. The system must load the current CAF/data fields, photo-ID, verification mode, activation gate, audit access, and retention policy for the actual ISP/UL/VNO/PM-WANI role and service. A mobile UAS/UL S-KYC flow must not be assumed to authorize or define fixed broadband onboarding. Keep the verification provider pluggable so that a compliant non-Aadhaar or approved assisted method can be selected without changing the shared order state machine.
+
+### Build sequence and acceptance gates
+
+1. Operator/compliance confirms exact DoT authorization/service category and subscriber verification rules; UIDAI offline method and OVSE applicability; accepted alternative identity routes; retention and consent text. No Aadhaar integration goes live before this gate.
+2. Define plan/coverage API, Lead-to-Customer conversion, duplicate-candidate review policy, refunds/cancellations and payment provider webhook contract.
+3. Build the shared acquisition API and server-owned state machine. Test idempotent retries, duplicate webhook delivery, concurrent self/technician registration, tenant isolation, consent withdrawal, failed verification, and payment reversal.
+4. Build separate customer and technician UI permissions over the same service API. Test technician assignment, offline non-sensitive drafts, expiry, and sync conflict behavior.
+5. Implement a read-only NMS reconciliation/dry-run first. Enable write provisioning only after exact NMS edition, API fields, side effects, permissions, idempotency key and recovery procedure are confirmed.
+6. Pilot with test identities and payment sandbox, then a small controlled customer set after compliance sign-off. Measure registration completion, manual-review rate, duplicate-candidate rate, payment reconciliation mismatch, activation latency, and failed/replayed event counts.
+
+### Official reference starting points
+
+- UIDAI, Aadhaar Authentication and Offline Verification Regulations (2021, as amended): https://uidai.gov.in/images/The_Aadhaar_Authentication_and_Offline_Verifications_Regulations_2021-_Clean_copy-30122025.pdf
+- UIDAI, Offline Verification Seeking Entity (OVSE) information: https://uidai.gov.in/pa/ovse
+- UIDAI, Aadhaar Paperless Offline e-KYC: https://uidai.gov.in/en/aadhaar-paperless-offline-e-kyc
+- DoT, Internet Service authorization portal: https://www.eservices.dot.gov.in/internet-service
+- DoT, Unified License conditions (use the clause set applicable to the operator's actual authorization): https://www.dot.gov.in/static/uploads/2025/07/904d5e1d1ff4fa068e5c1462af7875a6.pdf
