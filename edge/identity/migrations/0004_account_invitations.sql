@@ -11,6 +11,7 @@ CREATE TABLE account_invitations (
     organization_id UUID NOT NULL REFERENCES organizations(organization_id) ON DELETE RESTRICT,
     issuer_identity_id UUID NOT NULL REFERENCES identities(identity_id) ON DELETE RESTRICT,
     issuer_membership_id UUID NOT NULL,
+    issuer_request_id UUID NOT NULL,
     recipient_email_hmac BYTEA CHECK (
         recipient_email_hmac IS NULL OR octet_length(recipient_email_hmac) = 32
     ),
@@ -26,6 +27,7 @@ CREATE TABLE account_invitations (
     revoked_by_identity_id UUID REFERENCES identities(identity_id) ON DELETE RESTRICT,
     revoked_at TIMESTAMPTZ,
     CHECK (expires_at > created_at),
+    UNIQUE (issuer_identity_id, issuer_request_id),
     CHECK (
         (status = 'pending' AND redeemed_by_identity_id IS NULL
             AND redeemed_membership_id IS NULL AND redeemed_at IS NULL AND revoked_at IS NULL)
