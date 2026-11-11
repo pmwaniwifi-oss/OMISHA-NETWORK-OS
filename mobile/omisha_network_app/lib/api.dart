@@ -61,6 +61,46 @@ class WorkspaceContext {
   }
 }
 
+class WorkspaceInvitation {
+  const WorkspaceInvitation({
+    required this.id,
+    required this.roleCode,
+    required this.status,
+    required this.createdAt,
+    required this.expiresAt,
+  });
+
+  final String id;
+  final String roleCode;
+  final String status;
+  final DateTime createdAt;
+  final DateTime expiresAt;
+
+  factory WorkspaceInvitation.fromJson(Map<String, dynamic> json) {
+    final id = json['invitation_id'];
+    final role = json['role_code'];
+    final status = json['status'];
+    final created = json['created_at'];
+    final expires = json['expires_at'];
+    if (id is! String || role is! String || status is! String ||
+        created is! String || expires is! String) {
+      throw const ApiException('The invitation list response was invalid.');
+    }
+    final createdAt = DateTime.tryParse(created);
+    final expiresAt = DateTime.tryParse(expires);
+    if (createdAt == null || expiresAt == null) {
+      throw const ApiException('The invitation list response was invalid.');
+    }
+    return WorkspaceInvitation(
+      id: id,
+      roleCode: role,
+      status: status,
+      createdAt: createdAt,
+      expiresAt: expiresAt,
+    );
+  }
+}
+
 class InvitationResult {
   const InvitationResult({
     required this.id,
@@ -227,6 +267,34 @@ class OmishaApi {
       extraHeaders: {'Idempotency-Key': newIdempotencyKey()},
     );
     return InvitationResult.fromJson(response);
+  }
+
+  Future<List<WorkspaceInvitation>> listWorkspaceInvitations(String accessToken) async {
+    final response = await _send('GET', 'v1/me/invitations', token: accessToken);
+    final values = response['invitations'];
+    if (values is! List || values.length > 50) {
+      throw const ApiException('The invitation list response was invalid.');
+    }
+    return values.map((value) {
+      if (value is! Map) {
+        throw const ApiException('The invitation list response was invalid.');
+      }
+      return WorkspaceInvitation.fromJson(Map<String, dynamic>.from(value));
+    }).toList(growable: false);
+  }
+
+  Future<void> revokeWorkspaceInvitation({
+    required String accessToken,
+    required String invitationId,
+  }) async {
+    if (invitationId.length > 64) {
+      throw const ApiException('The invitation identifier was invalid.');
+    }
+    await _send(
+      'DELETE',
+      'v1/me/invitations/${Uri.encodeComponent(invitationId)}',
+      token: accessToken,
+    );
   }
 
   Future<Map<String, dynamic>> redeemInvitation({
