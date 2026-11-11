@@ -43,3 +43,22 @@ Replace the example HTTPS URL only after the Go API is deployed with TLS and the
 ## Verification state
 
 Flutter and Dart SDK were not present in the inspected workspace, so this source package has not been compiled or run. The Go endpoints above are a contract only and are not implemented by the current gateway. A production login, role workspace, mobile onboarding, or Android APK is not yet available.
+
+
+## Google social sign-in
+
+The app package includes the official Flutter Google Sign-In plugin and a Google button for any eligible account type. Configure `OMISHA_GOOGLE_SERVER_CLIENT_ID` at build time with the server/web OAuth client ID created in OMISHA's Google Cloud project. Also register the final Android application ID and signing certificate fingerprints there. Do not put a client secret in the app or repository.
+
+The app sends the Google ID token to `POST /v1/auth/social/google`; the Go backend must verify token signature, issuer, audience and expiry against Google's current keys before using it. Use Google's stable subject as the provider identity. Do not accept client-supplied role/tenant data, auto-link accounts solely by a typed email, or grant employee/ISP roles from Google sign-in. Staff and ISP memberships require server-side invitation/approval; customer service still requires the applicable contact/subscriber checks. Request no Google data-access scopes beyond basic sign-in.
+
+This endpoint does not exist in the current Go gateway. Until OMISHA creates and configures the OAuth project and backend verification endpoint, the Google button remains unavailable or returns a configuration/API error. The shell's OTP route is also a backend contract only.
+
+## Games, reels, and monetization boundary
+
+The planned customer Entertainment area will play OMISHA-created or explicitly licensed content. It will not scrape or re-host Instagram/YouTube reels. A social account login is not permission to use the account's posts commercially. Host each video once in the OMISHA media tier and store a single content record with rights, territory, age rating, moderation and expiry metadata.
+
+The first revenue option is an OMISHA-owned publisher/payee account with AdMob and optional direct sponsorship. Use test ads during development. Rewarded ads are voluntary and limited to non-essential game rewards; they never gate internet access, payments, support or regulatory functions. For any meaningful game reward, the backend must verify AdMob server-side callbacks and deduplicate each reward before posting it to an entertainment-only ledger. No AdMob SDK, production ad unit, game/reel catalog or rewards ledger is included yet. Do not store subscriber PII or identity evidence in ad analytics.
+
+## Build
+
+The local inspection environment did not have Flutter or Dart. After those tools are installed in a developer/build environment, generate the Android host project, configure app IDs/OAuth fingerprints and then resolve dependencies. Do not publish an APK until the Go auth endpoints and app privacy/identity provider configuration are live and reviewed.
