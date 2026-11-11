@@ -15,7 +15,6 @@ import androidx.credentials.exceptions.GetCredentialException;
 
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption;
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential;
-import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -108,7 +107,7 @@ public final class MainActivity extends FlutterActivity {
                         try {
                             GoogleIdTokenCredential token = GoogleIdTokenCredential.createFrom(credential.getData());
                             result.success(token.getIdToken());
-                        } catch (GoogleIdTokenParsingException error) {
+                        } catch (Exception error) {
                             result.error("invalid_credential", "Google returned an invalid sign-in credential.", null);
                         }
                     }
