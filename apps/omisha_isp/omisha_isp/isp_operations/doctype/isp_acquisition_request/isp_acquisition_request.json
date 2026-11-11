@@ -1,33 +1,204 @@
 {
- "doctype":"DocType",
- "name":"ISP Acquisition Request",
- "module":"ISP Operations",
- "autoname":"hash",
- "is_submittable":1,
- "track_changes":1,
- "engine":"InnoDB",
- "field_order":["channel","lead","requested_plan","service_address","assigned_technician","idempotency_key","section_identity","identity_method","identity_status","verification_reference","consent_recorded","section_workflow","acquisition_status","sales_order","service_order"],
- "fields":[
-  {"fieldname":"channel","label":"Acquisition Channel","fieldtype":"Select","options":"Customer Self-Service\nTechnician Assisted","reqd":1,"in_list_view":1},
-  {"fieldname":"lead","label":"Lead","fieldtype":"Link","options":"Lead","reqd":1,"in_list_view":1},
-  {"fieldname":"requested_plan","label":"Requested Plan","fieldtype":"Link","options":"Item","reqd":1},
-  {"fieldname":"service_address","label":"Service Address","fieldtype":"Link","options":"Address","reqd":1},
-  {"fieldname":"assigned_technician","label":"Assigned Technician","fieldtype":"Link","options":"User"},
-  {"fieldname":"idempotency_key","label":"Idempotency Key","fieldtype":"Data","reqd":1,"unique":1,"no_copy":1},
-  {"fieldname":"section_identity","label":"Identity Verification","fieldtype":"Section Break"},
-  {"fieldname":"identity_method","label":"Verification Method","fieldtype":"Select","options":"Not Selected\nAadhaar Offline Verification\nAadhaar e-KYC\nOther Approved ID\nAssisted Manual","default":"Not Selected"},
-  {"fieldname":"identity_status","label":"Verification Status","fieldtype":"Select","options":"Not Started\nPending\nVerified\nFailed\nManual Review","default":"Not Started","read_only":1,"in_list_view":1},
-  {"fieldname":"verification_reference","label":"Verification Reference","fieldtype":"Data","read_only":1,"no_copy":1},
-  {"fieldname":"consent_recorded","label":"Consent Recorded","fieldtype":"Check","default":"0","read_only":1},
-  {"fieldname":"section_workflow","label":"Onboarding Workflow","fieldtype":"Section Break"},
-  {"fieldname":"acquisition_status","label":"Acquisition Status","fieldtype":"Select","options":"Draft\nServiceability Review\nIdentity Review\nPayment Pending\nPayment Confirmed\nInstallation Pending\nInstalled\nProvisioning Pending\nActive\nManual Review\nRejected\nCancelled","default":"Draft","read_only":1,"in_list_view":1},
-  {"fieldname":"sales_order","label":"ERPNext Sales Order","fieldtype":"Link","options":"Sales Order","read_only":1},
-  {"fieldname":"service_order","label":"ISP Service Order","fieldtype":"Link","options":"ISP Service Order","read_only":1}
+ "doctype": "DocType",
+ "name": "ISP Acquisition Request",
+ "module": "ISP Operations",
+ "autoname": "hash",
+ "is_submittable": 1,
+ "track_changes": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "channel",
+  "lead",
+  "requested_plan",
+  "service_address",
+  "assigned_technician",
+  "idempotency_key",
+  "section_consent",
+  "consent_recorded",
+  "consent_method",
+  "consent_reference",
+  "consent_policy_version",
+  "consent_recorded_at",
+  "section_identity",
+  "identity_method",
+  "identity_status",
+  "verification_reference",
+  "section_workflow",
+  "acquisition_status",
+  "sales_order",
+  "service_order"
  ],
- "permissions":[
-  {"role":"System Manager","read":1,"write":1,"create":1,"submit":1,"cancel":1,"report":1},
-  {"role":"ISP Operations Manager","read":1,"write":1,"create":1,"submit":1,"report":1},
-  {"role":"ISP Service Desk","read":1,"create":1,"report":1},
-  {"role":"ISP Technician","read":1,"create":1,"report":1}
+ "fields": [
+  {
+   "fieldname": "channel",
+   "label": "Acquisition Channel",
+   "fieldtype": "Select",
+   "options": "Customer Self-Service\nTechnician Assisted",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "lead",
+   "label": "Lead",
+   "fieldtype": "Link",
+   "options": "Lead",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "requested_plan",
+   "label": "Requested Plan",
+   "fieldtype": "Link",
+   "options": "Item",
+   "reqd": 1
+  },
+  {
+   "fieldname": "service_address",
+   "label": "Service Address",
+   "fieldtype": "Link",
+   "options": "Address",
+   "reqd": 1
+  },
+  {
+   "fieldname": "assigned_technician",
+   "label": "Assigned Technician",
+   "fieldtype": "Link",
+   "options": "User"
+  },
+  {
+   "fieldname": "idempotency_key",
+   "label": "Idempotency Key",
+   "fieldtype": "Data",
+   "reqd": 1,
+   "unique": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "section_consent",
+   "label": "Consent Record",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "consent_recorded",
+   "label": "Consent Recorded",
+   "fieldtype": "Check",
+   "default": "0"
+  },
+  {
+   "fieldname": "consent_method",
+   "label": "Consent Method",
+   "fieldtype": "Select",
+   "options": "Not Selected\\nElectronic Self-Service\\nTechnician-Assisted Electronic\\nOther Approved Method",
+   "default": "Not Selected",
+   "reqd": 1
+  },
+  {
+   "fieldname": "consent_reference",
+   "label": "Consent Receipt Reference",
+   "fieldtype": "Data",
+   "reqd": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "consent_policy_version",
+   "label": "Consent Policy Version",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "consent_recorded_at",
+   "label": "Consent Recorded At",
+   "fieldtype": "Datetime",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_identity",
+   "label": "Identity Verification",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "identity_method",
+   "label": "Verification Method",
+   "fieldtype": "Select",
+   "options": "Not Selected\\nAadhaar Offline Verification\\nAadhaar e-KYC\\nOther Approved ID\\nAssisted Manual",
+   "default": "Not Selected",
+   "reqd": 1
+  },
+  {
+   "fieldname": "identity_status",
+   "label": "Verification Status",
+   "fieldtype": "Select",
+   "options": "Not Started\\nPending\\nVerified\\nFailed\\nManual Review",
+   "default": "Not Started",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "verification_reference",
+   "label": "Verification Reference",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "section_workflow",
+   "label": "Onboarding Workflow",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "acquisition_status",
+   "label": "Acquisition Status",
+   "fieldtype": "Select",
+   "options": "Draft\\nServiceability Review\\nIdentity Review\\nPayment Pending\\nPayment Confirmed\\nInstallation Pending\\nInstalled\\nProvisioning Pending\\nActive\\nManual Review\\nRejected\\nCancelled",
+   "default": "Draft",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "sales_order",
+   "label": "ERPNext Sales Order",
+   "fieldtype": "Link",
+   "options": "Sales Order",
+   "read_only": 1
+  },
+  {
+   "fieldname": "service_order",
+   "label": "ISP Service Order",
+   "fieldtype": "Link",
+   "options": "ISP Service Order",
+   "read_only": 1
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "submit": 1,
+   "cancel": 1,
+   "report": 1
+  },
+  {
+   "role": "ISP Operations Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "submit": 1,
+   "report": 1
+  },
+  {
+   "role": "ISP Service Desk",
+   "read": 1,
+   "create": 1,
+   "report": 1
+  },
+  {
+   "role": "ISP Technician",
+   "read": 1,
+   "create": 1,
+   "report": 1,
+   "submit": 1
+  }
  ]
 }
