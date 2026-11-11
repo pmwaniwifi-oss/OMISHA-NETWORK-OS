@@ -55,7 +55,7 @@ The Flutter UI calls a native Android Credential Manager bridge for Google sign-
 
 The app sends the Google ID token plus `challenge_id` to `POST /v1/auth/social/google`; the Go backend must verify token signature, issuer, audience, expiry and exact nonce claim against Google's current keys, then consume the challenge atomically. Use Google's stable subject as the provider identity. Do not accept client-supplied role/tenant data, auto-link accounts solely by a typed email, or grant employee/ISP roles from Google sign-in. Staff and ISP memberships require server-side invitation/approval; customer service still requires the applicable contact/subscriber checks. Request no Google data-access scopes beyond basic sign-in.
 
-Neither Google challenge nor token exchange endpoint exists in the current Go gateway. The native bridge and nonce-aware Flutter contract are not yet verified in an Android build. Until OMISHA configures the OAuth project and the Go verifier/session API is implemented, Google login is not operational. The shell's OTP route is also a backend contract only.
+The Go gateway now has Google challenge and token-exchange routes that validate the ID token, require the returned nonce to match the challenge, consume the challenge once, and issue an opaque identity session. These routes require the identity Compose overlay, applied migrations/runtime grants, `OMISHA_GOOGLE_SERVER_CLIENT_ID`, and secret files. The native bridge and Go integration have not yet been validated in an Android build. Membership/context endpoints and OTP delivery/verification remain unimplemented, so a complete customer or staff login is not operational.
 
 ## Games, reels, and monetization boundary
 
