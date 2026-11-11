@@ -45,7 +45,7 @@ jobs:
         shell: bash
         run: |
           host_dir="$RUNNER_TEMP/omisha-android-host"
-          flutter create --platforms=android --org com.omisha --project-name omisha_network_app "$host_dir"
+          flutter create --platforms=android --android-language java --org com.omisha --project-name omisha_network_app "$host_dir"
           mkdir -p android
           cp -a "$host_dir/android/." android/
           perl -0pi -e 's/<application\b/<application android:allowBackup="false"/' android/app/src/main/AndroidManifest.xml
