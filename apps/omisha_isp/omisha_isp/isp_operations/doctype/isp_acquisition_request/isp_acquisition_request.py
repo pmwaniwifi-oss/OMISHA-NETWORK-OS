@@ -15,10 +15,22 @@ class ISPAcquisitionRequest(Document):
         guarded_fields = (
             "identity_status",
             "verification_reference",
-            "consent_recorded",
+            "consent_policy_version",
+            "consent_recorded_at",
             "acquisition_status",
             "sales_order",
             "service_order",
+        )
+        immutable_after_submit = (
+            "channel",
+            "lead",
+            "requested_plan",
+            "service_address",
+            "assigned_technician",
+            "identity_method",
+            "consent_recorded",
+            "consent_method",
+            "consent_reference",
         )
         if self.is_new() and (
             self.identity_status != "Not Started"
@@ -30,6 +42,8 @@ class ISPAcquisitionRequest(Document):
         if previous:
             if self.idempotency_key != previous.idempotency_key:
                 frappe.throw(_("Idempotency Key cannot change after creation."))
+            if previous.docstatus == 1 and any(self.get(field) != previous.get(field) for field in immutable_after_submit):
+                frappe.throw(_("Submitted acquisition details and consent receipt cannot be edited."))
             if any(self.get(field) != previous.get(field) for field in guarded_fields):
                 if not getattr(frappe.flags, "omisha_acquisition_projection_update", False):
                     frappe.throw(_("Verification and workflow fields can only be changed by a trusted server-side integration."))
@@ -62,6 +76,21 @@ class ISPAcquisitionRequest(Document):
         if self.verification_reference and len(self.verification_reference) > 140:
             frappe.throw(_("Verification reference is too long. Store a reference only, never raw identity data."))
 
+    def before_submit(self):
+        if not self.consent_recorded or not self.consent_reference:
+            frappe.throw(_("A consent receipt must be recorded before submission."))
+        if self.identity_method == "Not Selected":
+            frappe.throw(_("Select an approved identity verification method before submission."))
+        if self.channel == "Customer Self-Service" and self.consent_method != "Electronic Self-Service":
+            frappe.throw(_("Self-service requests require electronic customer consent."))
+        if self.channel == "Technician Assisted" and self.consent_method not in {
+            "Technician-Assisted Electronic",
+            "Other Approved Method",
+        }:
+            frappe.throw(_("Technician-assisted requests require an approved consent method."))
+        if not frappe.conf.get("omisha_consent_policy_version"):
+            frappe.throw(_("Configure omisha_consent_policy_version before accepting onboarding consent."))
+
     def on_submit(self):
         # The event shares this transaction and contains no customer or identity payload.
         event = frappe.get_doc({
@@ -77,4 +106,6 @@ class ISPAcquisitionRequest(Document):
             "status": "Pending",
         })
         event.insert(ignore_permissions=True)
+        self.db_set("consent_policy_version", frappe.conf.get("omisha_consent_policy_version"), update_modified=False)
+        self.db_set("consent_recorded_at", frappe.utils.now_datetime(), update_modified=False)
         self.db_set("acquisition_status", "Serviceability Review", update_modified=False)
