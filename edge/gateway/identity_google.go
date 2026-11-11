@@ -261,10 +261,9 @@ func decodeGoogleExchangeRequest(w http.ResponseWriter, r *http.Request) (google
 func resolveGoogleIdentity(ctx context.Context, tx *sql.Tx, subjectHMAC []byte) (string, string, error) {
 	// Serialize first-time links for one provider subject. This avoids creating an orphan
 	// identity during simultaneous first logins and keeps DELETE out of the runtime grant set.
-	var lockAcquired any
-	if err := tx.QueryRowContext(ctx,
+	if _, err := tx.ExecContext(ctx,
 		`SELECT pg_advisory_xact_lock(hashtextextended(encode($1::bytea, 'hex'), 0))`,
-		subjectHMAC).Scan(&lockAcquired); err != nil {
+		subjectHMAC); err != nil {
 		return "", "", err
 	}
 
