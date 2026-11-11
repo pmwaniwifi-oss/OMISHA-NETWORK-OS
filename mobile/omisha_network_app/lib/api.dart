@@ -61,12 +61,20 @@ class WorkspaceContext {
 }
 
 class ApiSession {
-  const ApiSession({required this.accessToken, required this.context});
+  const ApiSession({
+    required this.accessToken,
+    required this.identityToken,
+    required this.context,
+  });
 
   final String accessToken;
+  final String identityToken;
   final WorkspaceContext context;
 
-  factory ApiSession.fromJson(Map<String, dynamic> json) {
+  factory ApiSession.fromJson(
+    Map<String, dynamic> json, {
+    required String identityToken,
+  }) {
     final token = json['access_token'];
     final context = json['active_context'];
     if (token is! String || token.length < 24 || token.length > 8192 || context is! Map) {
@@ -74,6 +82,7 @@ class ApiSession {
     }
     return ApiSession(
       accessToken: token,
+      identityToken: identityToken,
       context: WorkspaceContext.fromSessionJson(Map<String, dynamic>.from(context)),
     );
   }
@@ -161,21 +170,33 @@ class OmishaApi {
       token: identityToken,
       body: {'context_id': context.id},
     );
-    return ApiSession.fromJson(response);
+    return ApiSession.fromJson(response, identityToken: identityToken);
   }
 
-  Future<ApiSession> resumeSession(String accessToken) async {
+  Future<ApiSession> resumeSession({
+    required String accessToken,
+    required String identityToken,
+  }) async {
     final response = await _send('GET', 'v1/me', token: accessToken);
     return ApiSession(
       accessToken: accessToken,
+      identityToken: identityToken,
       context: WorkspaceContext.fromSessionJson(
         Map<String, dynamic>.from(response['active_context'] as Map),
       ),
     );
   }
 
-  Future<void> logout(String accessToken) async {
-    await _send('POST', 'v1/auth/logout', token: accessToken, body: const {});
+  Future<void> logout({
+    required String accessToken,
+    required String identityToken,
+  }) async {
+    await _send(
+      'POST',
+      'v1/auth/logout',
+      token: accessToken,
+      body: {'identity_token': identityToken},
+    );
   }
 
   Future<Map<String, dynamic>> _send(
