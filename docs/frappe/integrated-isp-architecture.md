@@ -514,4 +514,4 @@ The customer web portal and any future staff web portal use the same server auth
 5. Add OMISHA workforce modules only after assignment-scoped support and audited break-glass controls exist.
 6. Verify with cross-tenant access tests, role-escalation tests, revoked-session tests, device-cache clearing tests and offline-draft expiry tests before pilot.
 
-**Implementation status:** the repository currently has no Flutter/Android source tree or authentication/membership service. This section records the product decision and security contract; it does not claim that the app or logins have been built.
+**Implementation status:** the repository now has an initial Flutter package shell with a login/context-selection UI and separate secure identity/context tokens. It is not a build-ready Android project: Flutter/Dart were unavailable in the inspected workspace, generated Android platform files are absent, and the Go authentication/membership endpoints are not implemented. The shell is not a usable login or production app yet.
