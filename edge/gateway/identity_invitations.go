@@ -31,6 +31,7 @@ type invitationRow struct {
 	OrganizationType string
 	DisplayLabel   string
 	OrganizationStatus string
+	IssuerIdentityID string
 	IssuerMembershipID string
 	RoleCode       string
 	Status         string
@@ -184,7 +185,6 @@ func (api *googleIdentityAPI) redeemInvitation(w http.ResponseWriter, r *http.Re
 		return
 	}
 	var invite invitationRow
-	var issuerIdentityID string
 	err = tx.QueryRowContext(ctx,
 		`SELECT v.invitation_id::text, v.organization_id::text, o.organization_type,
 		        o.display_label, o.status, v.issuer_membership_id::text, v.role_code, v.status, v.expires_at,
@@ -194,7 +194,7 @@ func (api *googleIdentityAPI) redeemInvitation(w http.ResponseWriter, r *http.Re
 		 FOR UPDATE OF v`, digest).Scan(
 		&invite.ID, &invite.OrganizationID, &invite.OrganizationType, &invite.DisplayLabel,
 		&invite.OrganizationStatus, &invite.IssuerMembershipID, &invite.RoleCode, &invite.Status, &invite.ExpiresAt,
-		&invite.RedeemedMembershipID, &issuerIdentityID)
+		&invite.RedeemedMembershipID, &invite.IssuerIdentityID)
 	if err != nil {
 		writeAuthJSON(w, http.StatusNotFound, map[string]string{"error": "invitation is unavailable"})
 		return
@@ -378,7 +378,7 @@ func mayInvite(orgType, issuerRole, invitedRole string) bool {
 }
 
 func (api *googleIdentityAPI) issuerStillAuthorized(ctx context.Context, tx *sql.Tx, invite invitationRow) bool {
-	var issuerRole, issuerOrgType, issuerOrgStatus, identityStatus string
+	var issuerRole, issuerMembershipStatus, issuerOrgType, issuerOrgStatus, identityStatus string
 	var approvedAt sql.NullTime
 	var expiresAt sql.NullTime
 	err := tx.QueryRowContext(ctx,
@@ -389,14 +389,9 @@ func (api *googleIdentityAPI) issuerStillAuthorized(ctx context.Context, tx *sql
 		 JOIN identities i ON i.identity_id = m.identity_id
 		 WHERE m.membership_id = $1 AND m.identity_id = $2`,
 		invite.IssuerMembershipID, invite.IssuerIdentityID).
-		Scan(&issuerRole, new(string), &approvedAt, &expiresAt, &issuerOrgType, &issuerOrgStatus, &identityStatus)
-	if err != nil || issuerOrgStatus != "active" || identityStatus != "active" ||
-		approvedAt.Valid == false || (expiresAt.Valid && !expiresAt.Time.After(time.Now())) {
-		return false
-	}
-	var membershipStatus string
-	if err := tx.QueryRowContext(ctx,
-		`SELECT status FROM memberships WHERE membership_id = $1`, invite.IssuerMembershipID).Scan(&membershipStatus); err != nil || membershipStatus != "active" {
+		Scan(&issuerRole, &issuerMembershipStatus, &approvedAt, &expiresAt, &issuerOrgType, &issuerOrgStatus, &identityStatus)
+	if err != nil || issuerMembershipStatus != "active" || issuerOrgStatus != "active" ||
+		identityStatus != "active" || !approvedAt.Valid || (expiresAt.Valid && !expiresAt.Time.After(time.Now())) {
 		return false
 	}
 	if issuerOrgType == "omisha_workspace" && issuerRole == "omisha.platform_admin" && invite.RoleCode == "isp.owner" {
