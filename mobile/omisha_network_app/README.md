@@ -22,6 +22,14 @@ Google is the only user sign-in provider for customer, ISP and OMISHA staff acco
 
 Google proves account identity; it does not prove that the person is an ISP subscriber, employee, technician or administrator. OMISHA/ISP-approved membership provisioning assigns those workspaces. The app never allows users to grant themselves roles. Every business endpoint must independently enforce tenant, role and record assignment.
 
+## Enrollment and role assignment
+
+- OMISHA admin creates an ISP organization and issues the first ISP owner/admin invitation.
+- An authorized ISP admin issues ISP-bound staff/customer invitations. The invitation record fixes the allowed organization, role/scope, expiry and recipient restriction; the link cannot grant a role by changing URL parameters.
+- An end customer may also start in self-care without an invite. Serviceability, applicable identity checks and a server-verified/reconciled payment must pass before paid service onboarding is finalized.
+- Every invite recipient signs in with Google. Offline Aadhaar verification is a separate identity-proof step only if the operator confirms the legal basis, approved method, consent/alternatives and OVSE applicability. Aadhaar is never a login provider and raw Aadhaar files must not be retained in normal app storage.
+- Google identity alone creates no ISP, staff, customer-paid or admin entitlement. The server redeems the invitation once and creates the approved membership; all such flows are still planned and have no implementation/API yet.
+
 ## Session handling
 
 The app stores the short-lived identity token and active context access token in secure storage, never SharedPreferences. Google sign-in requests a fresh API challenge for each attempt and passes its nonce into Credential Manager; the raw Google token and nonce remain transient in memory. Context listing/switching uses only the membership token; customer/ISP/OMISHA business requests must use the server-issued context-scoped token. Logout clears both local tokens even if server revocation is temporarily unavailable. Expired sessions return the user to sign-in; no refresh-token flow is implemented.
