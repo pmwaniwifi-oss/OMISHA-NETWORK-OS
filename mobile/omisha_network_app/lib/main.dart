@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:google_sign_in/google_sign_in.dart';
+import 'package:flutter/services.dart';
 
 import 'api.dart';
 
 const _apiBaseUrl = String.fromEnvironment('OMISHA_API_BASE_URL');
 const _googleServerClientId = String.fromEnvironment('OMISHA_GOOGLE_SERVER_CLIENT_ID');
+const _googleIdentityChannel = MethodChannel('com.omisha.network_os/google_identity');
 const _sessionKey = 'omisha.scoped_access_token';
 const _identitySessionKey = 'omisha.identity_session_token';
 
@@ -31,7 +32,6 @@ class _OmishaAppState extends State<OmishaApp> {
   List<WorkspaceContext> _contexts = const [];
   ApiSession? _session;
   bool _busy = true;
-  bool _googleInitialized = false;
 
   @override
   void initState() {
@@ -133,7 +133,8 @@ class _OmishaAppState extends State<OmishaApp> {
   }
 
   Future<void> _signInWithGoogle() async {
-    if (_api == null) return;
+    final api = _api;
+    if (api == null) return;
     if (_googleServerClientId.isEmpty) {
       setState(() {
         _error = 'Google sign-in is not configured for this build yet.';
@@ -145,18 +146,21 @@ class _OmishaAppState extends State<OmishaApp> {
       _error = null;
     });
     try {
-      if (!_googleInitialized) {
-        await GoogleSignIn.instance.initialize(
-          serverClientId: _googleServerClientId,
-        );
-        _googleInitialized = true;
-      }
-      final account = await GoogleSignIn.instance.authenticate();
-      final googleIdToken = account.authentication.idToken;
-      if (googleIdToken == null) {
+      final challenge = await api.startGoogleChallenge();
+      final googleIdToken = await _googleIdentityChannel.invokeMethod<String>(
+        'googleIdToken',
+        {
+          'serverClientId': _googleServerClientId,
+          'nonce': challenge.nonce,
+        },
+      );
+      if (googleIdToken == null || googleIdToken.isEmpty) {
         throw const ApiException('Google did not return a sign-in token.');
       }
-      final identityToken = await _api.exchangeGoogleIdToken(googleIdToken);
+      final identityToken = await api.exchangeGoogleIdToken(
+        googleIdToken: googleIdToken,
+        challengeId: challenge.id,
+      );
       await _finishIdentityAuthentication(identityToken);
     } catch (exception) {
       if (!mounted) return;
@@ -267,6 +271,11 @@ class _OmishaAppState extends State<OmishaApp> {
     try {
       if (session != null && api != null) {
         await api.logout(session.identityToken);
+      }
+      try {
+        await _googleIdentityChannel.invokeMethod<void>('clearCredentialState');
+      } catch (_) {
+        // The OMISHA server session is still cleared locally even if provider cleanup fails.
       }
     } catch (_) {
       // Always clear local credentials; revocation is retried/handled server-side.
