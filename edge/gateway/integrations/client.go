@@ -23,6 +23,7 @@ var ErrAmbiguous = errors.New("integration record is ambiguous")
 var label = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
 var document = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9 ._-]{0,139}$`)
 var positiveID = regexp.MustCompile(`^[1-9][0-9]{0,18}$`)
+var frappeUser = regexp.MustCompile(`^[A-Za-z0-9._%+@-]{1,140}$`)
 
 type Client struct {
     tenant string
@@ -145,6 +146,49 @@ type ServiceOrderProjection struct {
 	RequestedPlan     string `json:"requested_plan"`
 	ServiceStatus     string `json:"service_status"`
 	ExternalServiceID string `json:"external_service_id"`
+}
+
+// InstallationJobProjection is a small technician queue view. It deliberately
+// excludes subscriber contact details and returns only ERP-owned installation fields.
+type InstallationJobProjection struct {
+	Name string `json:"name"`
+	AcquisitionRequest string `json:"acquisition_request"`
+	Outcome string `json:"installation_outcome"`
+	ONTVendor string `json:"ont_vendor"`
+	ONTModel string `json:"ont_model"`
+	ONTSerial string `json:"ont_serial"`
+	ONTMAC string `json:"ont_mac"`
+	OLTReference string `json:"olt_reference"`
+	FiberConnected int `json:"fiber_connected"`
+	ONTPowered int `json:"ont_powered"`
+	OpticalTestPassed int `json:"optical_test_passed"`
+	OpticalRXDBM *float64 `json:"optical_rx_dbm"`
+	WANLinkUp int `json:"wan_link_up"`
+	FailureCode string `json:"failure_code"`
+	Docstatus int `json:"docstatus"`
+}
+
+// AssignedInstallationJobs returns at most 50 open jobs assigned to one
+// operator-mapped Frappe user. The caller must derive the user mapping server-side.
+func (c *Client) AssignedInstallationJobs(ctx context.Context, tenant, user string) ([]InstallationJobProjection, error) {
+	if c.kind != "frappe" || !frappeUser.MatchString(user) {
+		return nil, errors.New("invalid technician mapping")
+	}
+	fields, _ := json.Marshal([]string{"name", "acquisition_request", "installation_outcome", "ont_vendor", "ont_model", "ont_serial", "ont_mac", "olt_reference", "fiber_connected", "ont_powered", "optical_test_passed", "optical_rx_dbm", "wan_link_up", "failure_code", "docstatus"})
+	filters, _ := json.Marshal([][]any{{"assigned_technician", "=", user}, {"docstatus", "=", 0}})
+	query := url.Values{}
+	query.Set("fields", string(fields))
+	query.Set("filters", string(filters))
+	query.Set("limit_page_length", "50")
+	query.Set("order_by", "modified asc")
+	raw, err := c.read(ctx, tenant, "/api/resource/ISP%20Installation%20Job?"+query.Encode())
+	if err != nil { return nil, err }
+	var envelope struct { Data []InstallationJobProjection `json:"data"` }
+	if json.Unmarshal(raw, &envelope) != nil || len(envelope.Data) > 50 { return nil, ErrUpstream }
+	for _, job := range envelope.Data {
+		if !document.MatchString(job.Name) || !document.MatchString(job.AcquisitionRequest) || job.Docstatus != 0 { return nil, ErrUpstream }
+	}
+	return envelope.Data, nil
 }
 
 func (c *Client) ServiceOrder(ctx context.Context, tenant, name string) (ServiceOrderProjection, error) {

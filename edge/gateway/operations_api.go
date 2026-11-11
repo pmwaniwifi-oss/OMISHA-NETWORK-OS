@@ -140,6 +140,33 @@ func (api *operationsAPI) getNMSContractReference(w http.ResponseWriter, r *http
 	}})
 }
 
+func (api *operationsAPI) listMyInstallationJobs(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
+	defer cancel()
+	principal, _, err := api.authorizeISPStaff(ctx, r, "isp.technician")
+	if err != nil {
+		writeOperationsError(w, err)
+		return
+	}
+	target, err := api.integrations.forOrganization(principal.OrganizationID.String)
+	if err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "operations integration unavailable"})
+		return
+	}
+	frappeUser, ok := target.frappeTechnicians[principal.IdentityID]
+	if !ok || frappeUser == "" {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "technician account mapping unavailable"})
+		return
+	}
+	jobs, err := target.frappe.AssignedInstallationJobs(ctx, principal.OrganizationID.String, frappeUser)
+	if err != nil {
+		writeIntegrationError(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeAuthJSON(w, http.StatusOK, map[string]any{"installation_jobs": jobs})
+}
+
 func writeOperationsError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, context.DeadlineExceeded):

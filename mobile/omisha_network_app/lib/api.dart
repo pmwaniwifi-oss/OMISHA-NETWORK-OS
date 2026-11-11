@@ -234,6 +234,33 @@ class NMSContractReference {
   }
 }
 
+class InstallationJob {
+  const InstallationJob({required this.id, required this.acquisition, required this.outcome,
+    required this.ontSerial, required this.ontMac, required this.oltReference,
+    required this.fiberConnected, required this.ontPowered, required this.opticalTestPassed,
+    required this.opticalRxDbm, required this.wanLinkUp});
+
+  final String id, acquisition, outcome, ontSerial, ontMac, oltReference;
+  final bool fiberConnected, ontPowered, opticalTestPassed, wanLinkUp;
+  final double? opticalRxDbm;
+
+  factory InstallationJob.fromJson(Map<String, dynamic> json) {
+    String text(String key) {
+      final value = json[key];
+      if (value is! String || value.length > 160) throw const ApiException('Installation job response was invalid.');
+      return value;
+    }
+    bool check(String key) => json[key] == 1 || json[key] == true;
+    final optical = json['optical_rx_dbm'];
+    if (optical != null && optical is! num) throw const ApiException('Installation job response was invalid.');
+    return InstallationJob(id: text('name'), acquisition: text('acquisition_request'),
+      outcome: text('installation_outcome'), ontSerial: text('ont_serial'), ontMac: text('ont_mac'),
+      oltReference: text('olt_reference'), fiberConnected: check('fiber_connected'),
+      ontPowered: check('ont_powered'), opticalTestPassed: check('optical_test_passed'),
+      opticalRxDbm: (optical as num?)?.toDouble(), wanLinkUp: check('wan_link_up'));
+  }
+}
+
 String newIdempotencyKey() {
   final random = Random.secure();
   final bytes = List<int>.generate(16, (_) => random.nextInt(256));
@@ -505,6 +532,15 @@ class OmishaApi {
       throw const ApiException('The network reference response was invalid.');
     }
     return NMSContractReference.fromJson(Map<String, dynamic>.from(value));
+  }
+
+  Future<List<InstallationJob>> getMyInstallationJobs({required String accessToken}) async {
+    final response = await _send('GET', 'v1/me/isp/technician/installation-jobs', token: accessToken);
+    final values = response['installation_jobs'];
+    if (values is! List || values.length > 50 || values.any((value) => value is! Map)) {
+      throw const ApiException('The installation job list response was invalid.');
+    }
+    return values.map((value) => InstallationJob.fromJson(Map<String, dynamic>.from(value as Map))).toList(growable: false);
   }
 
   Future<void> logout(String identityToken) async {

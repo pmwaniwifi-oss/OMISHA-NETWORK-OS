@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 
 	"omisha.network/edge-gateway/integrations"
@@ -19,6 +20,7 @@ type tenantIntegrationRegistry struct {
 type tenantIntegrationClients struct {
 	frappe *integrations.Client
 	nms    *integrations.Client
+	frappeTechnicians map[string]string
 }
 
 type tenantIntegrationConfig struct {
@@ -29,7 +31,10 @@ type tenantIntegrationConfig struct {
 	NMSOrigin      string `json:"nms_origin"`
 	NMSUsername    string `json:"nms_username"`
 	NMSPassword    string `json:"nms_password"`
+	FrappeTechnicians map[string]string `json:"frappe_technicians"`
 }
+
+var frappeUserIDPattern = regexp.MustCompile(`^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]{1,120}$`)
 
 type integrationRegistryFile struct {
 	Tenants []tenantIntegrationConfig `json:"tenants"`
@@ -78,6 +83,16 @@ func loadTenantIntegrationRegistry() *tenantIntegrationRegistry {
 			registry.err = errors.New("integration registry is invalid")
 			return registry
 		}
+		if len(tenant.FrappeTechnicians) > 10000 {
+			registry.err = errors.New("integration registry is invalid")
+			return registry
+		}
+		for identityID, userID := range tenant.FrappeTechnicians {
+			if !challengeIDPattern.MatchString(identityID) || !frappeUserIDPattern.MatchString(userID) {
+				registry.err = errors.New("integration registry is invalid")
+				return registry
+			}
+		}
 		nmsClient, err := integrations.NewNMSPrime(
 			tenant.OrganizationID, tenant.NMSOrigin, tenant.NMSUsername, tenant.NMSPassword,
 		)
@@ -92,6 +107,7 @@ func loadTenantIntegrationRegistry() *tenantIntegrationRegistry {
 		registry.tenants[tenant.OrganizationID] = tenantIntegrationClients{
 			frappe: frappeClient,
 			nms:    nmsClient,
+			frappeTechnicians: tenant.FrappeTechnicians,
 		}
 	}
 	return registry

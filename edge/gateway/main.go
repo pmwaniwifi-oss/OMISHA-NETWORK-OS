@@ -70,6 +70,7 @@ func handlerWithPing(ping func(context.Context) error) http.Handler {
 	mux.HandleFunc("GET /v1/me/isp/acquisitions/{acquisitionID}", operations.getAcquisition)
 	mux.HandleFunc("GET /v1/me/isp/service-orders/{serviceOrderID}", operations.getServiceOrder)
 	mux.HandleFunc("GET /v1/me/isp/nms/contracts/{number}", operations.getNMSContractReference)
+	mux.HandleFunc("GET /v1/me/isp/technician/installation-jobs", operations.listMyInstallationJobs)
 	mux.HandleFunc("/v1/", func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "customer API is not implemented", http.StatusNotImplemented)
 	})
