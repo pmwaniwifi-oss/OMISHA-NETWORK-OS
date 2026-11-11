@@ -1148,7 +1148,7 @@ class _OperationsLookupPageState extends State<_OperationsLookupPage> {
             ),
             const SizedBox(height: 16),
             DropdownButtonFormField<String>(
-              value: _kind,
+              initialValue: _kind,
               decoration: const InputDecoration(
                 labelText: 'Record type',
                 border: OutlineInputBorder(),
@@ -1361,7 +1361,7 @@ class _InstallationCloseoutDialogState extends State<_InstallationCloseoutDialog
   Widget build(BuildContext context) => AlertDialog(
     title: const Text('Installation closeout'),
     content: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 520), child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
-      DropdownButtonFormField<String>(value: _outcome, decoration: const InputDecoration(labelText: 'Outcome'),
+      DropdownButtonFormField<String>(initialValue: _outcome, decoration: const InputDecoration(labelText: 'Outcome'),
         items: const [DropdownMenuItem(value: 'Installed', child: Text('Installed')), DropdownMenuItem(value: 'Failed', child: Text('Failed')), DropdownMenuItem(value: 'Needs Review', child: Text('Needs review'))],
         onChanged: (value) { if (value != null) setState(() => _outcome = value); }),
       TextField(controller: _vendor, maxLength: 128, decoration: const InputDecoration(labelText: 'ONT vendor')),
@@ -1374,7 +1374,7 @@ class _InstallationCloseoutDialogState extends State<_InstallationCloseoutDialog
       CheckboxListTile(value: _optical, title: const Text('Optical test passed'), onChanged: (value) => setState(() => _optical = value ?? false)),
       TextField(controller: _rx, keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true), decoration: const InputDecoration(labelText: 'Optical RX (dBm)')),
       CheckboxListTile(value: _wan, title: const Text('WAN / link check passed'), onChanged: (value) => setState(() => _wan = value ?? false)),
-      if (_outcome != 'Installed') DropdownButtonFormField<String>(value: _failure, decoration: const InputDecoration(labelText: 'Failure / review code'),
+      if (_outcome != 'Installed') DropdownButtonFormField<String>(initialValue: _failure, decoration: const InputDecoration(labelText: 'Failure / review code'),
         items: const [DropdownMenuItem(value: '', child: Text('Choose a code')), DropdownMenuItem(value: 'No Signal', child: Text('No signal')), DropdownMenuItem(value: 'Low Optical Power', child: Text('Low optical power')), DropdownMenuItem(value: 'ONT Fault', child: Text('ONT fault')), DropdownMenuItem(value: 'Port/Provisioning Issue', child: Text('Port / provisioning issue')), DropdownMenuItem(value: 'Customer Premises Access', child: Text('Premises access')), DropdownMenuItem(value: 'Other', child: Text('Other'))],
         onChanged: (value) { if (value != null) setState(() => _failure = value); }),
       if (_outcome != 'Installed') TextField(controller: _notes, maxLength: 2000, maxLines: 3, decoration: const InputDecoration(labelText: 'Technician note')),
