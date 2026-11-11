@@ -13,12 +13,12 @@ One Flutter Android app package serves customer, ISP organization, and OMISHA wo
 
 The Go API/BFF must implement and secure these routes before login can work:
 
-1. `POST /v1/auth/challenges` with `identifier`; return a generic `challenge_id` response that does not reveal whether an account exists. The backend decides the allowed verification channel.
+1. `POST /v1/auth/challenges` with `identifier`; return a generic `challenge_id` response that does not reveal whether an account exists. The backend decides the allowed verification channel. It must rate-limit requests, make responses indistinguishable for unknown accounts, give codes a short lifetime and one-time use, and redact identifiers/codes from logs.
 2. `POST /v1/auth/challenges/verify` with challenge ID and code; return a short-lived `identity_token`. This token may enumerate only memberships and activate an authorized context; it must not authorize customer, ISP, or platform business data.
 3. `GET /v1/me/contexts` with the identity token; return server-authorized `context_id`, organization/workspace labels, role labels and display capabilities.
 4. `POST /v1/me/contexts/activate` with a context ID returned by step 3; server revalidates membership and returns a short-lived tenant/workspace-scoped `access_token` plus its active context.
 5. `GET /v1/me` with the scoped access token; return only the active workspace profile and capability display data.
-6. `POST /v1/auth/logout`; revoke the scoped token and associated identity session/token family.
+6. `POST /v1/auth/logout`; revoke the identity session and all scoped tokens in its token family; the identity token is sent only as the Authorization bearer, never in the request body.
 
 Every business endpoint must independently enforce user, role, tenant and record assignment. Hiding a screen in Flutter is not authorization. A request body cannot select a tenant, role, or capability. Customer, ISP staff, OMISHA workforce, and platform administration must have separate authorization scopes; platform or cross-tenant access is denied by default.
 
