@@ -569,7 +569,7 @@ class _OmishaAppState extends State<OmishaApp> {
 
   bool get _canOpenOperations {
     final roles = _session?.context.roleLabels ?? const <String>[];
-    return roles.any(const {'isp.owner', 'isp.admin', 'isp.support'}.contains);
+    return roles.contains('isp.owner') || roles.contains('isp.admin') || roles.contains('isp.support');
   }
 
   bool get _canCreateInvitation {
