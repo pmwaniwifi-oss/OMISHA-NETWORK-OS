@@ -120,37 +120,6 @@ class OmishaApi {
     return uri.replace(path: normalizedPath);
   }
 
-  Future<String> startChallenge(String identifier) async {
-    final response = await _send(
-      'POST',
-      'v1/auth/challenges',
-      body: {'identifier': identifier.trim()},
-    );
-    final challengeId = response['challenge_id'];
-    if (challengeId is! String || challengeId.isEmpty || challengeId.length > 200) {
-      throw const ApiException('The sign-in service returned an invalid response.');
-    }
-    return challengeId;
-  }
-
-  Future<String> verifyChallenge({
-    required String challengeId,
-    required String code,
-  }) async {
-    final response = await _send(
-      'POST',
-      'v1/auth/challenges/verify',
-      body: {'challenge_id': challengeId, 'code': code.trim()},
-    );
-    final identityToken = response['identity_token'];
-    if (identityToken is! String ||
-        identityToken.length < 24 ||
-        identityToken.length > 8192) {
-      throw const ApiException('The verification response was invalid.');
-    }
-    return identityToken;
-  }
-
   Future<GoogleAuthChallenge> startGoogleChallenge() async {
     final response = await _send('POST', 'v1/auth/social/google/challenge', body: const {});
     final id = response['challenge_id'];
