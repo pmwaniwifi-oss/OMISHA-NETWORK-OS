@@ -140,27 +140,34 @@ func (c *Client) Acquisition(ctx context.Context, tenant, name string) (Acquisit
 }
 
 // ServiceOrder reads a limited operational projection from the client Frappe site.
-func (c *Client) ServiceOrder(ctx context.Context, tenant, name string) (map[string]json.RawMessage, error) {
-    if c.kind != "frappe" || !document.MatchString(name) {
-        return nil, errors.New("invalid service order request")
-    }
-    fields, _ := json.Marshal([]string{
-        "name", "requested_plan", "service_status", "external_service_id",
-        "failure_summary", "requested_at",
-    })
-    query := url.Values{}
-    query.Set("fields", string(fields))
-    raw, err := c.read(ctx, tenant, "/api/resource/ISP%20Service%20Order/"+url.PathEscape(name)+"?"+query.Encode())
-    if err != nil {
-        return nil, err
-    }
-    var envelope struct {
-        Data map[string]json.RawMessage `json:"data"`
-    }
-    if json.Unmarshal(raw, &envelope) != nil || envelope.Data == nil || string(envelope.Data["name"]) != `"`+name+`"` {
-        return nil, ErrUpstream
-    }
-    return envelope.Data, nil
+type ServiceOrderProjection struct {
+	Name              string `json:"name"`
+	RequestedPlan     string `json:"requested_plan"`
+	ServiceStatus     string `json:"service_status"`
+	ExternalServiceID string `json:"external_service_id"`
+}
+
+func (c *Client) ServiceOrder(ctx context.Context, tenant, name string) (ServiceOrderProjection, error) {
+	var result ServiceOrderProjection
+	if c.kind != "frappe" || !document.MatchString(name) {
+		return result, errors.New("invalid service order request")
+	}
+	fields, _ := json.Marshal([]string{
+		"name", "requested_plan", "service_status", "external_service_id",
+	})
+	query := url.Values{}
+	query.Set("fields", string(fields))
+	raw, err := c.read(ctx, tenant, "/api/resource/ISP%20Service%20Order/"+url.PathEscape(name)+"?"+query.Encode())
+	if err != nil {
+		return result, err
+	}
+	var envelope struct {
+		Data ServiceOrderProjection `json:"data"`
+	}
+	if json.Unmarshal(raw, &envelope) != nil || envelope.Data.Name != name {
+		return result, ErrUpstream
+	}
+	return envelope.Data, nil
 }
 
 type nmsObjectReference struct {
