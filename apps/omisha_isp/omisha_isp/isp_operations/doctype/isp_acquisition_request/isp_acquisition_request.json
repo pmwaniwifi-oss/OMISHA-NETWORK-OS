@@ -25,6 +25,7 @@
   "verification_reference",
   "section_workflow",
   "acquisition_status",
+  "payment_request",
   "sales_order",
   "service_order"
  ],
@@ -153,6 +154,14 @@
    "default": "Draft",
    "read_only": 1,
    "in_list_view": 1
+  },
+  {
+   "fieldname": "payment_request",
+   "label": "ERPNext Payment Request",
+   "fieldtype": "Link",
+   "options": "Payment Request",
+   "read_only": 1,
+   "no_copy": 1
   },
   {
    "fieldname": "sales_order",
