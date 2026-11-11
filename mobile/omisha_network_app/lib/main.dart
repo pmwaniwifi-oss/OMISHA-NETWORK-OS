@@ -465,6 +465,15 @@ class _OmishaAppState extends State<OmishaApp> {
     );
   }
 
+  Future<void> _openInstallationJobs() async {
+    final api = _api;
+    final session = _session;
+    if (api == null || session == null) return;
+    await Navigator.of(context).push<void>(MaterialPageRoute(
+      builder: (_) => _InstallationJobsPage(api: api, accessToken: session.accessToken),
+    ));
+  }
+
   Future<void> _openContextPicker() async {
     final session = _session;
     if (_api == null || session == null) return;
@@ -572,6 +581,9 @@ class _OmishaAppState extends State<OmishaApp> {
     return roles.contains('isp.owner') || roles.contains('isp.admin') || roles.contains('isp.support');
   }
 
+  bool get _canOpenInstallationJobs =>
+      (_session?.context.roleLabels ?? const <String>[]).contains('isp.technician');
+
   bool get _canCreateInvitation {
     final roles = _session?.context.roleLabels ?? const <String>[];
     return roles.contains('omisha.platform_admin') ||
@@ -615,6 +627,7 @@ class _OmishaAppState extends State<OmishaApp> {
         onCreateInvitation: _canCreateInvitation ? _createInvitation : null,
         onManageInvitations: _canCreateInvitation ? _openInvitationManagement : null,
         onOpenOperations: _canOpenOperations ? _openOperations : null,
+        onOpenInstallationJobs: _canOpenInstallationJobs ? _openInstallationJobs : null,
       );
     }
     return _SignInPage(
@@ -875,6 +888,7 @@ class _WorkspacePage extends StatelessWidget {
     required this.onCreateInvitation,
     required this.onManageInvitations,
     required this.onOpenOperations,
+    required this.onOpenInstallationJobs,
   });
 
   final WorkspaceContext contextInfo;
@@ -884,6 +898,7 @@ class _WorkspacePage extends StatelessWidget {
   final VoidCallback? onCreateInvitation;
   final VoidCallback? onManageInvitations;
   final VoidCallback? onOpenOperations;
+  final VoidCallback? onOpenInstallationJobs;
 
   @override
   Widget build(BuildContext context) {
@@ -959,6 +974,14 @@ class _WorkspacePage extends StatelessWidget {
                 label: const Text('ISP service operations'),
               ),
             ),
+          ],
+          if (onOpenInstallationJobs != null) ...[
+            const SizedBox(height: 8),
+            SizedBox(width: double.infinity, child: OutlinedButton.icon(
+              onPressed: onOpenInstallationJobs,
+              icon: const Icon(Icons.handyman_outlined),
+              label: const Text('My fiber installation jobs'),
+            )),
           ],
           if (onManageInvitations != null) ...[
             const SizedBox(height: 8),
@@ -1180,6 +1203,64 @@ class _OperationsLookupPageState extends State<_OperationsLookupPage> {
       ),
     );
   }
+}
+
+class _InstallationJobsPage extends StatefulWidget {
+  const _InstallationJobsPage({required this.api, required this.accessToken});
+  final OmishaApi api;
+  final String accessToken;
+
+  @override
+  State<_InstallationJobsPage> createState() => _InstallationJobsPageState();
+}
+
+class _InstallationJobsPageState extends State<_InstallationJobsPage> {
+  List<InstallationJob> _jobs = const [];
+  String? _error;
+  bool _busy = false;
+
+  @override
+  void initState() { super.initState(); _load(); }
+
+  Future<void> _load() async {
+    setState(() { _busy = true; _error = null; });
+    try {
+      final jobs = await widget.api.getMyInstallationJobs(accessToken: widget.accessToken);
+      if (mounted) setState(() => _jobs = jobs);
+    } catch (error) {
+      if (mounted) setState(() => _error = error is ApiException ? error.message : 'Could not load installation jobs.');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('My fiber installation jobs'), actions: [
+      IconButton(onPressed: _busy ? null : _load, icon: const Icon(Icons.refresh), tooltip: 'Refresh'),
+    ]),
+    body: _busy && _jobs.isEmpty ? const Center(child: CircularProgressIndicator()) : ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        const Text('Assigned open jobs from the ISP operations system. Closeout submission will be added after the API workflow is validated.'),
+        if (_error != null) ...[const SizedBox(height: 12), _InlineError(_error!)],
+        if (!_busy && _error == null && _jobs.isEmpty) const Card(child: ListTile(title: Text('No open jobs assigned.'))),
+        for (final job in _jobs) Card(margin: const EdgeInsets.only(top: 12), child: Padding(
+          padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(job.id, style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            Text('Acquisition: ${job.acquisition}'),
+            Text('ONT serial: ${job.ontSerial}'),
+            if (job.ontMac.isNotEmpty) Text('ONT MAC: ${job.ontMac}'),
+            if (job.oltReference.isNotEmpty) Text('OLT/PON: ${job.oltReference}'),
+            const SizedBox(height: 8),
+            Text('Checks: fiber ${job.fiberConnected ? '✓' : '—'} · power ${job.ontPowered ? '✓' : '—'} · optical ${job.opticalTestPassed ? '✓' : '—'} · WAN ${job.wanLinkUp ? '✓' : '—'}'),
+            if (job.opticalRxDbm != null) Text('Optical RX: ${job.opticalRxDbm} dBm'),
+          ]),
+        )),
+      ],
+    ),
+  );
 }
 
 class _InlineError extends StatelessWidget {
