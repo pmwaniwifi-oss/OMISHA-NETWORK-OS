@@ -186,7 +186,7 @@ class _OmishaAppState extends State<OmishaApp> {
         throw const ApiException('No active account access is assigned to this sign-in.');
       }
       setState(() {
-        _identityToken = session.accessToken;
+        _identityToken = session.identityToken;
         _contexts = contexts;
         _busy = false;
       });
