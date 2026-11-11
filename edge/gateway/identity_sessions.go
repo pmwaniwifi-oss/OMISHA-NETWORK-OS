@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -253,13 +255,9 @@ func decodeStrictJSON(w http.ResponseWriter, r *http.Request, target any, maxByt
 		return err
 	}
 	var extra any
-	if err := decoder.Decode(&extra); err == nil {
+	if err := decoder.Decode(&extra); err != io.EOF {
 		return errors.New("extra JSON value")
 	}
 	return nil
 }
 
-// Indirection keeps callers independent from crypto/rand in this file's public API.
-var cryptoRandomRead = func(buffer []byte) (int, error) {
-	return cryptoRandRead(buffer)
-}
