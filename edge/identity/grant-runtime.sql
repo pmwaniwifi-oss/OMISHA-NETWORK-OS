@@ -2,6 +2,7 @@
 -- Deliberately omit DELETE, DDL, and broad default privileges from the gateway role.
 GRANT USAGE ON SCHEMA public TO omisha_identity_runtime;
 GRANT SELECT, INSERT ON identities, external_identities TO omisha_identity_runtime;
+GRANT INSERT ON organizations, memberships TO omisha_identity_runtime;
 GRANT SELECT, INSERT, UPDATE ON auth_challenge_nonces TO omisha_identity_runtime;
 GRANT SELECT, INSERT, UPDATE ON sessions TO omisha_identity_runtime;
 GRANT SELECT ON organizations, memberships TO omisha_identity_runtime;
