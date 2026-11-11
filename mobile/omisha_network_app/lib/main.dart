@@ -62,10 +62,13 @@ class _OmishaAppState extends State<OmishaApp> {
         });
         return;
       }
+      if (token != null || identityToken != null) {
+        await _secureStorage.delete(key: _sessionKey);
+        await _secureStorage.delete(key: _identitySessionKey);
+      }
     } on ApiException catch (exception) {
       if (exception.statusCode == 401) {
         await _secureStorage.delete(key: _sessionKey);
-      await _secureStorage.delete(key: _identitySessionKey);
         await _secureStorage.delete(key: _identitySessionKey);
       }
       _error = exception.message;
@@ -213,6 +216,7 @@ class _OmishaAppState extends State<OmishaApp> {
       // Always clear local credentials; revocation is retried/handled server-side.
     } finally {
       await _secureStorage.delete(key: _sessionKey);
+      await _secureStorage.delete(key: _identitySessionKey);
       if (!mounted) return;
       setState(() {
         _session = null;
