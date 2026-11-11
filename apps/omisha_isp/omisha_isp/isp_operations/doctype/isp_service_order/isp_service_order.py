@@ -10,6 +10,15 @@ class ISPServiceOrder(Document):
     def validate(self):
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{7,127}", self.idempotency_key or ""):
             frappe.throw(_("Idempotency Key must contain 8–128 safe characters."))
+        previous = self.get_doc_before_save()
+        projection_fields = ("service_status", "external_service_id", "failure_summary")
+        if previous and self.idempotency_key != previous.idempotency_key:
+            frappe.throw(_("Idempotency Key cannot change after the order is created."))
+        if self.is_new() and self.service_status != "Requested":
+            frappe.throw(_("New service orders must begin in Requested state."))
+        if previous and any(self.get(field) != previous.get(field) for field in projection_fields):
+            if not getattr(frappe.flags, "omisha_nms_projection_update", False):
+                frappe.throw(_("NMS status fields can only be changed by the verified integration worker."))
         if not frappe.db.exists("Customer", self.customer):
             frappe.throw(_("Customer does not exist on this client site."))
         if self.payload_json:
