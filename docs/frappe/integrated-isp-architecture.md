@@ -556,7 +556,7 @@ The client callback is not authoritative for awarding valuable rewards. For rewa
 ### Implementation gates
 
 1. OMISHA owner creates the Google Cloud OAuth app and verifies branding; package ID and signing fingerprints are fixed in the Android release pipeline.
-2. Implement server-side invitation creation/redemption for OMISHA admins, ISP admins and customers, plus Google subject mapping, account recovery, rate limits and audit logs. Do not add OTP/password or another login provider; staff step-up protection must be enforced through the Google/workforce security policy.
+2. Integrate the invitation create/redeem routes into OMISHA/ISP admin screens and Android/web deep-link handling; add invitation delivery/revocation, bootstrap the first OMISHA admin, and complete recovery/rate-limit/abuse controls. Do not add OTP/password or another login provider; staff step-up protection must be enforced through the Google/workforce security policy.
 3. Provide the Google social button in the one app. Keep it available to customer, ISP-staff and OMISHA identities, while the server controls membership and may require additional staff MFA.
 4. Define entertainment content rights, moderation, age/consent policy, storage/CDN, retention, and OMISHA AdMob publisher/payee account.
 5. Add AdMob using test IDs only, then test ad callbacks and server-side verification. Move to production ad units only after store/privacy policy and publisher account review.
