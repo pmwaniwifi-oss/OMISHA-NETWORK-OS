@@ -1,0 +1,101 @@
+name: Android app shell build
+
+on:
+  pull_request:
+    paths:
+      - "mobile/omisha_network_app/**"
+      - ".github/workflows/mobile-android.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "mobile/omisha_network_app/**"
+      - ".github/workflows/mobile-android.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android-debug-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: mobile/omisha_network_app
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: "3.38.1"
+          cache: true
+          cache-key: flutter-3.38.1
+
+      - name: Generate Android host project
+        shell: bash
+        run: |
+          host_dir="$RUNNER_TEMP/omisha-android-host"
+          flutter create --platforms=android --android-language java --org com.omisha --project-name omisha_network_app "$host_dir"
+          mkdir -p android
+          cp -a "$host_dir/android/." android/
+          perl -0pi -e 's/<application\b/<application android:allowBackup="false"/' android/app/src/main/AndroidManifest.xml
+          mkdir -p android/app/src/main/java/com/omisha/omisha_network_app
+          cp android-host/MainActivity.java android/app/src/main/java/com/omisha/omisha_network_app/MainActivity.java
+          python - <<'PY'
+          from pathlib import Path
+
+          candidates = [Path("android/app/build.gradle.kts"), Path("android/app/build.gradle")]
+          gradle_file = next((path for path in candidates if path.exists()), None)
+          if gradle_file is None:
+              raise SystemExit("Generated Android app Gradle file was not found")
+          source = gradle_file.read_text()
+          if "minSdk = flutter.minSdkVersion" in source:
+              source = source.replace("minSdk = flutter.minSdkVersion", "minSdk = 23")
+          elif "minSdkVersion = flutter.minSdkVersion" in source:
+              source = source.replace("minSdkVersion = flutter.minSdkVersion", "minSdkVersion = 23")
+          elif "minSdkVersion flutter.minSdkVersion" in source:
+              source = source.replace("minSdkVersion flutter.minSdkVersion", "minSdkVersion 23")
+          else:
+              raise SystemExit("Could not safely set Android minSdk to Credential Manager minimum (23)")
+          dependencies = (
+              '    implementation("androidx.credentials:credentials:1.6.0")\n'
+              '    implementation("androidx.credentials:credentials-play-services-auth:1.6.0")\n'
+              '    implementation("com.google.android.libraries.identity.googleid:googleid:1.2.0")\n'
+          )
+          if "androidx.credentials:credentials:1.6.0" not in source:
+              if "dependencies {" in source:
+                  source = source.replace("dependencies {", "dependencies {\n" + dependencies, 1)
+              else:
+                  source += "\ndependencies {\n" + dependencies + "}\n"
+          gradle_file.write_text(source)
+          PY
+
+      - name: Resolve Flutter dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Analyze Dart source
+        run: flutter analyze --fatal-infos
+
+      - name: Build debug APK
+        run: >-
+          flutter build apk --debug
+          --dart-define=OMISHA_API_BASE_URL=https://api.example.invalid/
+          --dart-define=OMISHA_GOOGLE_SERVER_CLIENT_ID=
+
+      - name: Upload debug APK artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: omisha-network-os-android-debug
+          path: mobile/omisha_network_app/build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7

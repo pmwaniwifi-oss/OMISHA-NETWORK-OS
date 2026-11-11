@@ -1,0 +1,7 @@
+{
+  "LICENSE": "4234a14fb0a788985bf429eb9ea73bfb93139967e8dcee191f7d4f621970c800",
+  "compose.yaml": "23639b9216b99956ca77943fd94e98ab8500acc0e0b4693af3e542b1cdcd3016",
+  "overrides/compose.redis.yaml": "ee757a39ca74e3a56409b4b2c0b22e66877c824aa1c9b4ddcb100300ba2a671b",
+  "overrides/compose.mariadb-secrets.yaml": "9fdc20e898c7deef86746f62bd2a4345bb0c1208efa3b85bb00dfb5c58f98986",
+  "overrides/compose.mariadb.yaml": "854dc2ffc13c4b2cd406316aca5e08da6f6c1cc88e0ff48f3dfababe154996d2"
+}

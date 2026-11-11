@@ -1,0 +1,117 @@
+name: Foundation checks
+on:
+  pull_request:
+  push:
+    branches: [main, 'codex/**']
+permissions:
+  contents: read
+concurrency:
+  group: foundation-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  upstream-config:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          submodules: recursive
+      - run: python scripts/verify_upstreams.py
+      - name: Validate Frappe configuration without deployment
+        env:
+          OMISHA_STACK: omisha-ci-frappe
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          folder = Path(os.environ['RUNNER_TEMP'])
+          secret = folder / 'frappe-ci-password'
+          secret.write_text('synthetic-ci-value-not-a-runtime-secret')
+          secret.chmod(0o600)
+          (folder / 'frappe-ci.env').write_text('ERPNEXT_VERSION=v16.54.0\nOMISHA_FRAPPE_SITE=ci.localhost\nDB_PASSWORD_SECRETS_FILE=' + str(secret) + '\n')
+          PY
+          export OMISHA_ENV_FILE="$RUNNER_TEMP/frappe-ci.env"
+          bash deploy/frappe/compose.sh config --format json | python scripts/check_frappe_config.py
+          docker manifest inspect frappe/erpnext:v16.54.0 > /dev/null
+          docker manifest inspect mariadb:11.8 > /dev/null
+          docker manifest inspect redis:8.6-alpine > /dev/null
+      - name: Validate isolated NMS PostgreSQL configuration without starting it
+        env:
+          NMS_STACK: omisha-ci-nms
+        run: |
+          export NMS_CI_ENV="$RUNNER_TEMP/nms-ci.env"
+          printf 'NMS_POSTGRES_VERSION=16\nNMS_DB_NAME=nmsprime_ci\nNMS_DB_USER=nmsprime_ci\nNMS_DB_PASSWORD_FILE=%s/nms-ci-password\n' "$RUNNER_TEMP" > "$NMS_CI_ENV"
+          printf 'synthetic-ci-value-not-a-runtime-secret' > "$RUNNER_TEMP/nms-ci-password"
+          chmod 600 "$NMS_CI_ENV" "$RUNNER_TEMP/nms-ci-password"
+          docker compose --env-file "$NMS_CI_ENV" -p "$NMS_STACK" -f deploy/nms-database/compose.yaml config --format json | python scripts/check_nms_db_config.py
+          docker manifest inspect postgres:16-alpine > /dev/null
+  python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r licensing/requirements.txt -r logging/requirements.txt
+      - run: python -m unittest discover -s licensing -p 'test_*.py' -v
+      - run: python -m unittest discover -s scripts -p 'test_*.py' -v
+      - run: python -m unittest discover -s logging -p 'test_*.py' -v
+      - run: python -m unittest discover -s reporting -p 'test_*.py' -v
+  go:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: edge/gateway/go.mod
+          cache: false
+      - working-directory: edge/gateway
+        run: |
+          go mod tidy -diff
+          go vet ./...
+          go test -race ./...
+  containers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OMISHA_TENANT: ci-tenant
+      OMISHA_INSTALLATION: ci-installation
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: |
+          docker compose config --quiet
+          docker compose -f edge/docker-compose.yml config --quiet
+          docker compose build
+          docker compose -f edge/docker-compose.yml build
+          docker build -t omisha-reporting-ci reporting
+      - name: Reporting tests inside container
+        run: |
+          docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges --network none --tmpfs /tmp:rw,noexec,nosuid,size=16m -v "$PWD/reporting:/tests:ro" --entrypoint python omisha-reporting-ci -m unittest discover -s /tests -p 'test_*.py' -v
+      - name: Licensing tests inside the pinned image
+        run: |
+          docker compose -f docker-compose.yml -f .github/compose.test.yml run --rm --no-deps -v "$PWD/licensing:/tests:ro" --entrypoint python licensing -m unittest discover -s /tests -p 'test_*.py' -v
+      - name: Edge connectivity smoke test
+        run: |
+          docker compose -f edge/docker-compose.yml up -d --wait --wait-timeout 90
+          curl --fail --retry 10 --retry-connrefused --retry-delay 1 http://127.0.0.1:8088/healthz
+          curl --fail http://127.0.0.1:8088/readyz
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8088/v1/customer)" = 501
+          docker compose -f edge/docker-compose.yml stop valkey
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8088/readyz)" = 503
+          curl --fail http://127.0.0.1:8088/healthz
+      - name: Cleanup CI containers
+        if: always()
+        run: |
+          docker compose -f edge/docker-compose.yml ps
+          docker compose -f edge/docker-compose.yml logs --tail 50
+          docker compose -f edge/docker-compose.yml down --volumes
+          docker compose down --volumes

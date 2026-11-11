@@ -1,0 +1,292 @@
+package main
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"math"
+	"net/http"
+	"regexp"
+	"time"
+
+	"omisha.network/edge-gateway/integrations"
+)
+
+var errOperationsUnavailable = errors.New("operations unavailable")
+var errOperationsAuthentication = errors.New("authentication required")
+var errOperationsAccess = errors.New("account access unavailable")
+
+var operationDocumentName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._-]{0,139}$`)
+var operationNMSNumber = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+var operationMAC = regexp.MustCompile(`(?i)^([0-9a-f]{2}:){5}[0-9a-f]{2}$`)
+
+type operationsAPI struct {
+	identity    *googleIdentityAPI
+	integrations *tenantIntegrationRegistry
+}
+
+func (api *operationsAPI) authorizeISPStaff(ctx context.Context, r *http.Request, roles ...string) (sessionPrincipal, string, error) {
+	var empty sessionPrincipal
+	if api == nil || api.identity == nil || api.identity.db == nil || api.identity.configErr != nil {
+		return empty, "", errOperationsUnavailable
+	}
+	principal, err := api.identity.authenticateSession(ctx, r, "context")
+	if err != nil || !principal.OrganizationID.Valid || !principal.MembershipID.Valid {
+		return empty, "", errOperationsAuthentication
+	}
+	var role string
+	err = api.identity.db.QueryRowContext(ctx,
+		`SELECT m.role_code
+		 FROM memberships m
+		 JOIN organizations o ON o.organization_id = m.organization_id
+		 JOIN identities i ON i.identity_id = m.identity_id
+		 WHERE m.membership_id = $1 AND m.identity_id = $2 AND m.organization_id = $3
+		   AND m.status = 'active' AND m.approved_at IS NOT NULL
+		   AND (m.expires_at IS NULL OR m.expires_at > now())
+		   AND o.organization_type = 'isp_tenant' AND o.status = 'active'
+		   AND i.status = 'active'`,
+		principal.MembershipID.String, principal.IdentityID, principal.OrganizationID.String,
+	).Scan(&role)
+	if err != nil {
+		return empty, "", errOperationsAccess
+	}
+	for _, allowed := range roles {
+		if role == allowed {
+			return principal, role, nil
+		}
+	}
+	return empty, "", errOperationsAccess
+}
+
+func (api *operationsAPI) getAcquisition(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
+	defer cancel()
+	principal, _, err := api.authorizeISPStaff(ctx, r, "isp.owner", "isp.admin", "isp.support")
+	if err != nil {
+		writeOperationsError(w, err)
+		return
+	}
+	name := r.PathValue("acquisitionID")
+	if !operationDocumentName.MatchString(name) {
+		writeAuthJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid acquisition reference"})
+		return
+	}
+	target, err := api.integrations.forOrganization(principal.OrganizationID.String)
+	if err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "operations integration unavailable"})
+		return
+	}
+	projection, err := target.frappe.Acquisition(ctx, principal.OrganizationID.String, name)
+	if err != nil {
+		writeIntegrationError(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeAuthJSON(w, http.StatusOK, map[string]any{"acquisition": projection})
+}
+
+func (api *operationsAPI) getServiceOrder(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
+	defer cancel()
+	principal, _, err := api.authorizeISPStaff(ctx, r, "isp.owner", "isp.admin", "isp.support")
+	if err != nil {
+		writeOperationsError(w, err)
+		return
+	}
+	name := r.PathValue("serviceOrderID")
+	if !operationDocumentName.MatchString(name) {
+		writeAuthJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid service order reference"})
+		return
+	}
+	target, err := api.integrations.forOrganization(principal.OrganizationID.String)
+	if err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "operations integration unavailable"})
+		return
+	}
+	projection, err := target.frappe.ServiceOrder(ctx, principal.OrganizationID.String, name)
+	if err != nil {
+		writeIntegrationError(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeAuthJSON(w, http.StatusOK, map[string]any{"service_order": projection})
+}
+
+func (api *operationsAPI) getNMSContractReference(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
+	defer cancel()
+	principal, _, err := api.authorizeISPStaff(ctx, r, "isp.owner", "isp.admin")
+	if err != nil {
+		writeOperationsError(w, err)
+		return
+	}
+	number := r.PathValue("number")
+	if !operationNMSNumber.MatchString(number) {
+		writeAuthJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid contract reference"})
+		return
+	}
+	target, err := api.integrations.forOrganization(principal.OrganizationID.String)
+	if err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "operations integration unavailable"})
+		return
+	}
+	id, err := target.nms.ContractIDByNumber(ctx, principal.OrganizationID.String, number)
+	if err != nil {
+		writeIntegrationError(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeAuthJSON(w, http.StatusOK, map[string]any{"contract_reference": map[string]any{
+		"number": number,
+		"nms_id": id,
+	}})
+}
+
+func (api *operationsAPI) listMyInstallationJobs(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
+	defer cancel()
+	principal, _, err := api.authorizeISPStaff(ctx, r, "isp.technician")
+	if err != nil {
+		writeOperationsError(w, err)
+		return
+	}
+	target, err := api.integrations.forOrganization(principal.OrganizationID.String)
+	if err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "operations integration unavailable"})
+		return
+	}
+	frappeUser, ok := target.frappeTechnicians[principal.IdentityID]
+	if !ok || frappeUser == "" {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "technician account mapping unavailable"})
+		return
+	}
+	jobs, err := target.frappe.AssignedInstallationJobs(ctx, principal.OrganizationID.String, frappeUser)
+	if err != nil {
+		writeIntegrationError(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeAuthJSON(w, http.StatusOK, map[string]any{"installation_jobs": jobs})
+}
+
+func (api *operationsAPI) getInstallationJobNMSReference(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
+	defer cancel()
+	principal, _, err := api.authorizeISPStaff(ctx, r, "isp.technician")
+	if err != nil {
+		writeOperationsError(w, err)
+		return
+	}
+	name := r.PathValue("jobID")
+	if !operationDocumentName.MatchString(name) {
+		writeAuthJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid installation job reference"})
+		return
+	}
+	target, err := api.integrations.forOrganization(principal.OrganizationID.String)
+	if err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "operations integration unavailable"})
+		return
+	}
+	frappeUser, ok := target.frappeTechnicians[principal.IdentityID]
+	if !ok || frappeUser == "" {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "technician account mapping unavailable"})
+		return
+	}
+	job, err := target.frappe.AssignedInstallationJob(ctx, principal.OrganizationID.String, name, frappeUser)
+	if err != nil {
+		writeIntegrationError(w, err)
+		return
+	}
+	if job.ONTMAC == "" {
+		writeAuthJSON(w, http.StatusConflict, map[string]string{"error": "ONT WAN MAC is not recorded on this job"})
+		return
+	}
+	modemID, err := target.nms.ModemIDByMAC(ctx, principal.OrganizationID.String, job.ONTMAC)
+	if err != nil {
+		writeIntegrationError(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeAuthJSON(w, http.StatusOK, map[string]any{"nms_modem_reference": map[string]any{
+		"installation_job": job.Name,
+		"nms_modem_id": modemID,
+		"match_status": "exact_mac_match",
+	}})
+}
+
+func (api *operationsAPI) submitInstallationCloseout(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	principal, _, err := api.authorizeISPStaff(ctx, r, "isp.technician")
+	if err != nil {
+		writeOperationsError(w, err)
+		return
+	}
+	name := r.PathValue("jobID")
+	if !operationDocumentName.MatchString(name) {
+		writeAuthJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid installation job reference"})
+		return
+	}
+	var closeout integrations.InstallationCloseoutInput
+	if err := decodeStrictJSON(w, r, &closeout, 16<<10); err != nil {
+		writeAuthJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid installation closeout payload"})
+		return
+	}
+	if (closeout.Outcome != "Installed" && closeout.Outcome != "Failed" && closeout.Outcome != "Needs Review") ||
+		len(closeout.ONTVendor) == 0 || len(closeout.ONTVendor) > 128 ||
+		len(closeout.ONTModel) == 0 || len(closeout.ONTModel) > 128 ||
+		len(closeout.ONTSerial) == 0 || len(closeout.ONTSerial) > 128 ||
+		len(closeout.ONTMAC) > 32 || len(closeout.OLTReference) > 128 || len(closeout.FailureCode) > 80 || len(closeout.TechnicianNotes) > 2000 ||
+		(closeout.ONTMAC != "" && !operationMAC.MatchString(closeout.ONTMAC)) ||
+		(closeout.OpticalRXDBM != nil && (math.IsNaN(*closeout.OpticalRXDBM) || math.IsInf(*closeout.OpticalRXDBM, 0) || *closeout.OpticalRXDBM < -100 || *closeout.OpticalRXDBM > 20)) {
+		writeAuthJSON(w, http.StatusBadRequest, map[string]string{"error": "installation closeout fields are invalid"})
+		return
+	}
+	target, err := api.integrations.forOrganization(principal.OrganizationID.String)
+	if err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "operations integration unavailable"})
+		return
+	}
+	frappeUser, ok := target.frappeTechnicians[principal.IdentityID]
+	if !ok || frappeUser == "" {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "technician account mapping unavailable"})
+		return
+	}
+	result, err := target.frappe.SubmitInstallationCloseout(ctx, principal.OrganizationID.String, name, frappeUser, closeout)
+	if err != nil {
+		writeIntegrationError(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeAuthJSON(w, http.StatusOK, map[string]any{"installation_closeout": result})
+}
+
+func writeOperationsError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		writeAuthJSON(w, http.StatusGatewayTimeout, map[string]string{"error": "operations request timed out"})
+	case errors.Is(err, errOperationsAuthentication):
+		writeAuthJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+	case errors.Is(err, errOperationsUnavailable):
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "operations service unavailable"})
+	default:
+		writeAuthJSON(w, http.StatusForbidden, map[string]string{"error": "account access unavailable"})
+	}
+}
+
+func writeIntegrationError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, integrations.ErrNotFound):
+		writeAuthJSON(w, http.StatusNotFound, map[string]string{"error": "operations record not found"})
+	case errors.Is(err, integrations.ErrAmbiguous):
+		writeAuthJSON(w, http.StatusConflict, map[string]string{"error": "operations record needs reconciliation"})
+	case errors.Is(err, integrations.ErrTenant):
+		writeAuthJSON(w, http.StatusForbidden, map[string]string{"error": "account access unavailable"})
+	case errors.Is(err, integrations.ErrUpstream):
+		writeAuthJSON(w, http.StatusBadGateway, map[string]string{"error": "operations system unavailable"})
+	case errors.Is(err, sql.ErrNoRows):
+		writeAuthJSON(w, http.StatusNotFound, map[string]string{"error": "operations record not found"})
+	default:
+		writeAuthJSON(w, http.StatusBadGateway, map[string]string{"error": "operations system unavailable"})
+	}
+}

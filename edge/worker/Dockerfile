@@ -1,8 +1,8 @@
 FROM rust:1.99.1-slim-bookworm AS builder
 WORKDIR /src
-COPY Cargo.toml ./
+COPY Cargo.toml Cargo.lock ./
 COPY src ./src
-RUN cargo build --release --offline
+RUN cargo build --release --locked --offline
 
 FROM debian:bookworm-slim
 RUN useradd --system --uid 10001 omisha

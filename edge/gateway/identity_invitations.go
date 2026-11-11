@@ -1,0 +1,618 @@
+package main
+
+import (
+	"context"
+	"crypto/rand"
+	"database/sql"
+	"encoding/base64"
+	"errors"
+	"net/http"
+	"strings"
+	"time"
+)
+
+const (
+	invitationDefaultLifetime = 72 * time.Hour
+	invitationMaximumLifetime = 7 * 24 * time.Hour
+)
+
+func (api *googleIdentityAPI) invitationServiceReady(w http.ResponseWriter, r *http.Request) bool {
+	if api == nil || api.configErr != nil || api.db == nil || len(api.hmacKey) < 32 {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation service is not configured"})
+		return false
+	}
+	if api.limiter == nil || !api.limiter.allow("invitation:"+remoteAddress(r), 30, 10*time.Minute) {
+		writeAuthJSON(w, http.StatusTooManyRequests, map[string]string{"error": "invitation rate limit exceeded"})
+		return false
+	}
+	return true
+}
+
+type invitationRequest struct {
+	RoleCode       string `json:"role_code"`
+	ExpiresInHours int    `json:"expires_in_hours"`
+}
+
+type createISPRequest struct {
+	DisplayLabel string `json:"display_label"`
+}
+
+type invitationRow struct {
+	ID             string
+	OrganizationID string
+	OrganizationType string
+	DisplayLabel   string
+	OrganizationStatus string
+	IssuerIdentityID string
+	IssuerMembershipID string
+	RoleCode       string
+	Status         string
+	ExpiresAt      time.Time
+	RedeemedMembershipID sql.NullString
+}
+
+func (api *googleIdentityAPI) createISPAndOwnerInvitation(w http.ResponseWriter, r *http.Request) {
+	if !api.invitationServiceReady(w, r) { return }
+	var body createISPRequest
+	if err := decodeStrictJSON(w, r, &body, 4096); err != nil || strings.TrimSpace(body.DisplayLabel) == "" || len([]rune(strings.TrimSpace(body.DisplayLabel))) > 120 {
+		writeAuthJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid ISP registration request"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
+	defer cancel()
+	tx, err := api.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "ISP registration unavailable"})
+		return
+	}
+	defer tx.Rollback()
+	requestID := r.Header.Get("Idempotency-Key")
+	if !challengeIDPattern.MatchString(requestID) {
+		writeAuthJSON(w, http.StatusBadRequest, map[string]string{"error": "a UUID v4 Idempotency-Key header is required"})
+		return
+	}
+	principal, err := api.authenticateSessionTx(ctx, tx, r, "context")
+	if err != nil {
+		writeAuthJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+		return
+	}
+	role, orgType, err := activeContextRole(ctx, tx, principal)
+	if err != nil || orgType != "omisha_workspace" || role != "omisha.platform_admin" {
+		writeAuthJSON(w, http.StatusForbidden, map[string]string{"error": "OMISHA administrator access required"})
+		return
+	}
+	if requestAlreadyUsed(ctx, tx, principal.IdentityID, requestID) {
+		writeAuthJSON(w, http.StatusConflict, map[string]string{"error": "Idempotency-Key was already used; request a new invitation"})
+		return
+	}
+	organizationID, err := randomUUID()
+	if err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "ISP registration unavailable"})
+		return
+	}
+	label := strings.TrimSpace(body.DisplayLabel)
+	if _, err = tx.ExecContext(ctx,
+		`INSERT INTO organizations (organization_id, organization_type, display_label, status)
+		 VALUES ($1, 'isp_tenant', $2, 'active')`, organizationID, label); err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "ISP registration unavailable"})
+		return
+	}
+	invite, token, err := api.insertInvitation(ctx, tx, principal, organizationID, "isp.owner", invitationDefaultLifetime, requestID)
+	if err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "ISP invitation could not be created"})
+		return
+	}
+	if err := insertEnrollmentAudit(ctx, tx, principal.IdentityID, organizationID, "enrollment.isp.created", "success"); err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "ISP registration unavailable"})
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "ISP registration unavailable"})
+		return
+	}
+	writeInvitationResponse(w, invite, token)
+}
+
+func (api *googleIdentityAPI) createWorkspaceInvitation(w http.ResponseWriter, r *http.Request) {
+	if !api.invitationServiceReady(w, r) { return }
+	var body invitationRequest
+	if err := decodeStrictJSON(w, r, &body, 4096); err != nil || !validRoleCode(body.RoleCode) {
+		writeAuthJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid invitation request"})
+		return
+	}
+	lifetime, ok := invitationLifetime(body.ExpiresInHours)
+	if !ok {
+		writeAuthJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid invitation expiry"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	tx, err := api.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation unavailable"})
+		return
+	}
+	defer tx.Rollback()
+	requestID := r.Header.Get("Idempotency-Key")
+	if !challengeIDPattern.MatchString(requestID) {
+		writeAuthJSON(w, http.StatusBadRequest, map[string]string{"error": "a UUID v4 Idempotency-Key header is required"})
+		return
+	}
+	principal, err := api.authenticateSessionTx(ctx, tx, r, "context")
+	if err != nil {
+		writeAuthJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+		return
+	}
+	issuerRole, orgType, err := activeContextRole(ctx, tx, principal)
+	if err != nil || !mayInvite(orgType, issuerRole, body.RoleCode) {
+		writeAuthJSON(w, http.StatusForbidden, map[string]string{"error": "invitation permission denied"})
+		return
+	}
+	if requestAlreadyUsed(ctx, tx, principal.IdentityID, requestID) {
+		writeAuthJSON(w, http.StatusConflict, map[string]string{"error": "Idempotency-Key was already used; request a new invitation"})
+		return
+	}
+	invite, token, err := api.insertInvitation(ctx, tx, principal, principal.OrganizationID.String, body.RoleCode, lifetime, requestID)
+	if err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation unavailable"})
+		return
+	}
+	if err := insertEnrollmentAudit(ctx, tx, principal.IdentityID, principal.OrganizationID.String, "enrollment.invitation.created", "success"); err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation unavailable"})
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation unavailable"})
+		return
+	}
+	writeInvitationResponse(w, invite, token)
+}
+
+func (api *googleIdentityAPI) redeemInvitation(w http.ResponseWriter, r *http.Request) {
+	if !api.invitationServiceReady(w, r) { return }
+	var body struct {
+		Token string `json:"invitation_token"`
+	}
+	if err := decodeStrictJSON(w, r, &body, 4096); err != nil || len(body.Token) < 40 || len(body.Token) > 128 {
+		writeAuthJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid invitation"})
+		return
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(body.Token)
+	if err != nil || len(raw) != 32 {
+		writeAuthJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid invitation"})
+		return
+	}
+	digest := keyedDigest(api.hmacKey, "account-invitation-token", body.Token)
+	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
+	defer cancel()
+	tx, err := api.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation could not be accepted"})
+		return
+	}
+	defer tx.Rollback()
+	principal, err := api.authenticateSessionTx(ctx, tx, r, "identity")
+	if err != nil {
+		writeAuthJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+		return
+	}
+	var invite invitationRow
+	err = tx.QueryRowContext(ctx,
+		`SELECT v.invitation_id::text, v.organization_id::text, o.organization_type,
+		        o.display_label, o.status, v.issuer_membership_id::text, v.role_code, v.status, v.expires_at,
+		        v.redeemed_membership_id::text, v.issuer_identity_id::text
+		 FROM account_invitations v JOIN organizations o ON o.organization_id = v.organization_id
+		 WHERE v.token_hmac = $1
+		 FOR UPDATE OF v`, digest).Scan(
+		&invite.ID, &invite.OrganizationID, &invite.OrganizationType, &invite.DisplayLabel,
+		&invite.OrganizationStatus, &invite.IssuerMembershipID, &invite.RoleCode, &invite.Status, &invite.ExpiresAt,
+		&invite.RedeemedMembershipID, &invite.IssuerIdentityID)
+	if err != nil {
+		writeAuthJSON(w, http.StatusNotFound, map[string]string{"error": "invitation is unavailable"})
+		return
+	}
+	if invite.Status == "redeemed" && invite.RedeemedMembershipID.Valid {
+		var redeemedBy string
+		err = tx.QueryRowContext(ctx,
+			`SELECT redeemed_by_identity_id::text FROM account_invitations WHERE invitation_id = $1`,
+			invite.ID).Scan(&redeemedBy)
+		if err == nil && redeemedBy == principal.IdentityID {
+			if err := tx.Commit(); err != nil {
+				writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation could not be accepted"})
+				return
+			}
+			writeAuthJSON(w, http.StatusOK, map[string]any{
+				"status": invitationMembershipStatus(invite.RoleCode),
+				"organization_name": invite.DisplayLabel,
+				"role_code": invite.RoleCode,
+				"membership_id": invite.RedeemedMembershipID.String,
+			})
+			return
+		}
+		writeAuthJSON(w, http.StatusConflict, map[string]string{"error": "invitation is unavailable"})
+		return
+	}
+	if invite.Status != "pending" || invite.OrganizationStatus != "active" || !invite.ExpiresAt.After(time.Now()) {
+		writeAuthJSON(w, http.StatusGone, map[string]string{"error": "invitation is unavailable"})
+		return
+	}
+	if !api.issuerStillAuthorized(ctx, tx, invite) {
+		writeAuthJSON(w, http.StatusForbidden, map[string]string{"error": "invitation issuer access is no longer valid"})
+		return
+	}
+	var emailBound bool
+	if err := tx.QueryRowContext(ctx,
+		`SELECT recipient_email_hmac IS NOT NULL FROM account_invitations WHERE invitation_id = $1`,
+		invite.ID).Scan(&emailBound); err != nil || emailBound {
+		// The initial redemption API has no verified-email claim contract; fail closed for bound invitations.
+		writeAuthJSON(w, http.StatusForbidden, map[string]string{"error": "invitation recipient verification is unavailable"})
+		return
+	}
+	var existingMembershipID, existingStatus string
+	err = tx.QueryRowContext(ctx,
+		`SELECT membership_id::text, status FROM memberships
+		 WHERE identity_id = $1 AND organization_id = $2 AND role_code = $3`,
+		principal.IdentityID, invite.OrganizationID, invite.RoleCode).Scan(&existingMembershipID, &existingStatus)
+	membershipID := ""
+	if err == nil {
+		if existingStatus != "active" {
+			writeAuthJSON(w, http.StatusConflict, map[string]string{"error": "existing account access needs administrator review"})
+			return
+		}
+		membershipID = existingMembershipID
+	} else if errors.Is(err, sql.ErrNoRows) {
+		membershipID, err = randomUUID()
+		if err != nil {
+			writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation could not be accepted"})
+			return
+		}
+		status := "active"
+			var approvedBy any = invite.IssuerIdentityID
+		var approvedAt any = time.Now().UTC()
+		if invite.RoleCode == "isp.customer" {
+			// Customer workspace remains pending until identity/serviceability/payment checks complete.
+			status = "invited"
+			approvedBy = nil
+			approvedAt = nil
+		}
+		_, err = tx.ExecContext(ctx,
+			`INSERT INTO memberships
+			 (membership_id, identity_id, organization_id, role_code, scope_json, status, approved_by, approved_at)
+			 SELECT $1, $2, v.organization_id, v.role_code, v.scope_json, $3, $4, $5
+			 FROM account_invitations v WHERE v.invitation_id = $6`,
+			membershipID, principal.IdentityID, status, approvedBy, approvedAt, invite.ID)
+		if err != nil {
+			writeAuthJSON(w, http.StatusConflict, map[string]string{"error": "invitation could not be accepted"})
+			return
+		}
+	} else {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation could not be accepted"})
+		return
+	}
+	result, err := tx.ExecContext(ctx,
+		`UPDATE account_invitations SET status = 'redeemed', redeemed_by_identity_id = $2,
+		        redeemed_membership_id = $3, redeemed_at = now()
+		 WHERE invitation_id = $1 AND status = 'pending' AND expires_at > now()`,
+		invite.ID, principal.IdentityID, membershipID)
+	if err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation could not be accepted"})
+		return
+	}
+	changed, err := result.RowsAffected()
+	if err != nil || changed != 1 {
+		writeAuthJSON(w, http.StatusGone, map[string]string{"error": "invitation is unavailable"})
+		return
+	}
+	if err := insertEnrollmentAudit(ctx, tx, principal.IdentityID, invite.OrganizationID, "enrollment.invitation.redeemed", "success"); err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation could not be accepted"})
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation could not be accepted"})
+		return
+	}
+	writeAuthJSON(w, http.StatusOK, map[string]any{
+		"status": invitationMembershipStatus(invite.RoleCode),
+		"organization_name": invite.DisplayLabel,
+		"role_code": invite.RoleCode,
+		"membership_id": membershipID,
+	})
+}
+
+func (api *googleIdentityAPI) insertInvitation(ctx context.Context, tx *sql.Tx, issuer sessionPrincipal, organizationID, roleCode string, lifetime time.Duration, requestID string) (invitationRow, string, error) {
+	var invite invitationRow
+	var err error
+	invite.ID, err = randomUUID()
+	if err != nil {
+		return invite, "", err
+	}
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return invite, "", err
+	}
+	token := base64.RawURLEncoding.EncodeToString(raw)
+	invite.OrganizationID = organizationID
+	invite.RoleCode = roleCode
+	invite.Status = "pending"
+	invite.ExpiresAt = time.Now().UTC().Add(lifetime)
+	if err := tx.QueryRowContext(ctx,
+		`SELECT organization_type, display_label FROM organizations WHERE organization_id = $1 AND status = 'active'`,
+		organizationID).Scan(&invite.OrganizationType, &invite.DisplayLabel); err != nil {
+		return invite, "", err
+	}
+	_, err = tx.ExecContext(ctx,
+		`INSERT INTO account_invitations
+		 (invitation_id, token_hmac, organization_id, issuer_identity_id, issuer_membership_id,
+		  issuer_request_id, role_code, scope_json, status, expires_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, '{}'::jsonb, 'pending', $8)`,
+		invite.ID, keyedDigest(api.hmacKey, "account-invitation-token", token),
+		organizationID, issuer.IdentityID, issuer.MembershipID.String, requestID, roleCode, invite.ExpiresAt)
+	return invite, token, err
+}
+
+func activeContextRole(ctx context.Context, tx *sql.Tx, principal sessionPrincipal) (string, string, error) {
+	if !principal.OrganizationID.Valid || !principal.MembershipID.Valid {
+		return "", "", errors.New("context session is incomplete")
+	}
+	var role, organizationType string
+	err := tx.QueryRowContext(ctx,
+		`SELECT m.role_code, o.organization_type
+		 FROM memberships m JOIN organizations o ON o.organization_id = m.organization_id
+		 JOIN identities i ON i.identity_id = m.identity_id
+		 WHERE m.membership_id = $1 AND m.identity_id = $2
+		   AND m.organization_id = $3 AND i.status = 'active'
+		   AND m.status = 'active' AND m.approved_at IS NOT NULL
+		   AND o.status = 'active' AND (m.expires_at IS NULL OR m.expires_at > now())`,
+		principal.MembershipID.String, principal.IdentityID, principal.OrganizationID.String).Scan(&role, &organizationType)
+	return role, organizationType, err
+}
+
+type invitationSummary struct {
+	ID        string     `json:"invitation_id"`
+	RoleCode  string     `json:"role_code"`
+	Status    string     `json:"status"`
+	CreatedAt time.Time  `json:"created_at"`
+	ExpiresAt time.Time  `json:"expires_at"`
+	RedeemedAt *time.Time `json:"redeemed_at,omitempty"`
+	RevokedAt *time.Time  `json:"revoked_at,omitempty"`
+}
+
+func (api *googleIdentityAPI) listWorkspaceInvitations(w http.ResponseWriter, r *http.Request) {
+	if !api.invitationServiceReady(w, r) { return }
+	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+	defer cancel()
+	principal, err := api.authenticateSession(ctx, r, "context")
+	if err != nil {
+		writeAuthJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+		return
+	}
+	role, orgType, err := api.activeContextRoleRead(ctx, principal)
+	if err != nil || !mayManageInvitations(orgType, role) {
+		writeAuthJSON(w, http.StatusForbidden, map[string]string{"error": "invitation permission denied"})
+		return
+	}
+	rows, err := api.db.QueryContext(ctx,
+		`SELECT invitation_id::text, role_code, status, created_at, expires_at, redeemed_at, revoked_at
+		 FROM account_invitations
+		 WHERE organization_id = $1
+		 ORDER BY created_at DESC LIMIT 50`,
+		principal.OrganizationID.String)
+	if err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation list unavailable"})
+		return
+	}
+	defer rows.Close()
+	items := make([]invitationSummary, 0, 16)
+	for rows.Next() {
+		var item invitationSummary
+		var redeemedAt, revokedAt sql.NullTime
+		if err := rows.Scan(&item.ID, &item.RoleCode, &item.Status, &item.CreatedAt, &item.ExpiresAt, &redeemedAt, &revokedAt); err != nil {
+			writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation list unavailable"})
+			return
+		}
+		if redeemedAt.Valid { item.RedeemedAt = &redeemedAt.Time }
+		if revokedAt.Valid { item.RevokedAt = &revokedAt.Time }
+		items = append(items, item)
+	}
+	if rows.Err() != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation list unavailable"})
+		return
+	}
+	writeAuthJSON(w, http.StatusOK, map[string]any{"invitations": items})
+}
+
+func (api *googleIdentityAPI) revokeWorkspaceInvitation(w http.ResponseWriter, r *http.Request) {
+	if !api.invitationServiceReady(w, r) { return }
+	id := r.PathValue("invitationID")
+	if !challengeIDPattern.MatchString(id) {
+		writeAuthJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid invitation id"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+	defer cancel()
+	tx, err := api.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation revoke unavailable"})
+		return
+	}
+	defer tx.Rollback()
+	principal, err := api.authenticateSessionTx(ctx, tx, r, "context")
+	if err != nil {
+		writeAuthJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+		return
+	}
+	role, orgType, err := activeContextRole(ctx, tx, principal)
+	if err != nil || !mayManageInvitations(orgType, role) {
+		writeAuthJSON(w, http.StatusForbidden, map[string]string{"error": "invitation permission denied"})
+		return
+	}
+	var status string
+	err = tx.QueryRowContext(ctx,
+		`SELECT status FROM account_invitations
+		 WHERE invitation_id = $1 AND organization_id = $2 FOR UPDATE`,
+		id, principal.OrganizationID.String).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeAuthJSON(w, http.StatusNotFound, map[string]string{"error": "invitation not found"})
+		return
+	}
+	if err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation revoke unavailable"})
+		return
+	}
+	if status == "redeemed" {
+		writeAuthJSON(w, http.StatusConflict, map[string]string{"error": "redeemed invitation cannot be revoked; remove membership separately"})
+		return
+	}
+	if status == "revoked" {
+		if err := tx.Commit(); err != nil {
+			writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation revoke unavailable"})
+			return
+		}
+		writeAuthJSON(w, http.StatusOK, map[string]bool{"revoked": true})
+		return
+	}
+	result, err := tx.ExecContext(ctx,
+		`UPDATE account_invitations SET status = 'revoked', revoked_by_identity_id = $2, revoked_at = now()
+		 WHERE invitation_id = $1 AND organization_id = $3 AND status = 'pending'`,
+		id, principal.IdentityID, principal.OrganizationID.String)
+	if err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation revoke unavailable"})
+		return
+	}
+	changed, err := result.RowsAffected()
+	if err != nil || changed != 1 {
+		writeAuthJSON(w, http.StatusConflict, map[string]string{"error": "invitation is no longer pending"})
+		return
+	}
+	if err := insertEnrollmentAudit(ctx, tx, principal.IdentityID, principal.OrganizationID.String, "enrollment.invitation.revoked", "success"); err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation revoke unavailable"})
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation revoke unavailable"})
+		return
+	}
+	writeAuthJSON(w, http.StatusOK, map[string]bool{"revoked": true})
+}
+
+func (api *googleIdentityAPI) activeContextRoleRead(ctx context.Context, principal sessionPrincipal) (string, string, error) {
+	var role, orgType string
+	err := api.db.QueryRowContext(ctx,
+		`SELECT m.role_code, o.organization_type
+		 FROM sessions s JOIN memberships m ON m.membership_id = s.membership_id AND m.identity_id = s.identity_id
+		 JOIN organizations o ON o.organization_id = s.organization_id
+		 JOIN identities i ON i.identity_id = s.identity_id
+		 WHERE s.session_id = $1 AND i.status = 'active'
+		   AND m.status = 'active' AND m.approved_at IS NOT NULL
+		   AND o.status = 'active' AND (m.expires_at IS NULL OR m.expires_at > now())`,
+		principal.SessionID).Scan(&role, &orgType)
+	return role, orgType, err
+}
+
+func mayManageInvitations(orgType, role string) bool {
+	if orgType == "omisha_workspace" { return role == "omisha.platform_admin" }
+	return orgType == "isp_tenant" && (role == "isp.owner" || role == "isp.admin")
+}
+
+func mayInvite(orgType, issuerRole, invitedRole string) bool {
+	if orgType == "omisha_workspace" {
+		return issuerRole == "omisha.platform_admin" && invitedRole == "omisha.staff"
+	}
+	if orgType != "isp_tenant" {
+		return false
+	}
+	switch issuerRole {
+	case "isp.owner":
+		switch invitedRole {
+		case "isp.admin", "isp.technician", "isp.sales", "isp.support", "isp.finance", "isp.customer":
+			return true
+		}
+	case "isp.admin":
+		switch invitedRole {
+		case "isp.technician", "isp.sales", "isp.support", "isp.finance", "isp.customer":
+			return true
+		}
+	}
+	return false
+}
+
+func (api *googleIdentityAPI) issuerStillAuthorized(ctx context.Context, tx *sql.Tx, invite invitationRow) bool {
+	var issuerRole, issuerMembershipStatus, issuerOrgType, issuerOrgStatus, identityStatus string
+	var approvedAt sql.NullTime
+	var expiresAt sql.NullTime
+	err := tx.QueryRowContext(ctx,
+		`SELECT m.role_code, m.status, m.approved_at, m.expires_at,
+		        o.organization_type, o.status, i.status
+		 FROM memberships m
+		 JOIN organizations o ON o.organization_id = m.organization_id
+		 JOIN identities i ON i.identity_id = m.identity_id
+		 WHERE m.membership_id = $1 AND m.identity_id = $2`,
+		invite.IssuerMembershipID, invite.IssuerIdentityID).
+		Scan(&issuerRole, &issuerMembershipStatus, &approvedAt, &expiresAt, &issuerOrgType, &issuerOrgStatus, &identityStatus)
+	if err != nil || issuerMembershipStatus != "active" || issuerOrgStatus != "active" ||
+		identityStatus != "active" || !approvedAt.Valid || (expiresAt.Valid && !expiresAt.Time.After(time.Now())) {
+		return false
+	}
+	if issuerOrgType == "omisha_workspace" && issuerRole == "omisha.platform_admin" && invite.RoleCode == "isp.owner" {
+		return true
+	}
+	return issuerOrgType == invite.OrganizationType &&
+		mayInvite(issuerOrgType, issuerRole, invite.RoleCode)
+}
+
+func requestAlreadyUsed(ctx context.Context, tx *sql.Tx, issuerIdentityID, requestID string) bool {
+	var exists bool
+	err := tx.QueryRowContext(ctx,
+		`SELECT EXISTS (
+			SELECT 1 FROM account_invitations
+			WHERE issuer_identity_id = $1 AND issuer_request_id = $2
+		)`, issuerIdentityID, requestID).Scan(&exists)
+	return err != nil || exists
+}
+
+func validRoleCode(role string) bool {
+	switch role {
+	case "omisha.staff", "isp.owner", "isp.admin", "isp.technician", "isp.sales", "isp.support", "isp.finance", "isp.customer":
+		return true
+	default:
+		return false
+	}
+}
+
+func invitationMembershipStatus(role string) string {
+	if role == "isp.customer" {
+		return "pending_onboarding"
+	}
+	return "active"
+}
+
+func invitationLifetime(hours int) (time.Duration, bool) {
+	if hours == 0 {
+		return invitationDefaultLifetime, true
+	}
+	if hours < 1 || time.Duration(hours)*time.Hour > invitationMaximumLifetime {
+		return 0, false
+	}
+	return time.Duration(hours) * time.Hour, true
+}
+
+func writeInvitationResponse(w http.ResponseWriter, invite invitationRow, token string) {
+	writeAuthJSON(w, http.StatusCreated, map[string]any{
+		"invitation_id": invite.ID,
+		"organization_id": invite.OrganizationID,
+		"organization_name": invite.DisplayLabel,
+		"role_code": invite.RoleCode,
+		"expires_at": invite.ExpiresAt.Format(time.RFC3339),
+		"invitation_token": token,
+	})
+}
+
+func insertEnrollmentAudit(ctx context.Context, tx *sql.Tx, actorIdentityID, organizationID, eventCode, outcome string) error {
+	_, err := tx.ExecContext(ctx,
+		`INSERT INTO security_audit_events
+		 (actor_identity_id, organization_id, event_code, outcome, metadata)
+		 VALUES ($1, $2, $3, $4, '{}'::jsonb)`,
+		actorIdentityID, organizationID, eventCode, outcome)
+	return err
+}
+

@@ -1,0 +1,16 @@
+{
+ "doctype":"DocType","name":"ISP Service Order","module":"ISP Operations","autoname":"hash","is_submittable":1,"track_changes":1,"engine":"InnoDB","field_order":["customer","requested_plan","requested_at","idempotency_key","payload_json","section_status","service_status","external_service_id","failure_summary"],"fields":[
+  {"fieldname":"customer","label":"Customer","fieldtype":"Link","options":"Customer","reqd":1,"in_list_view":1},
+  {"fieldname":"requested_plan","label":"Requested Plan","fieldtype":"Link","options":"Item","reqd":1,"in_list_view":1},
+  {"fieldname":"requested_at","label":"Requested At","fieldtype":"Datetime","default":"Now","reqd":1},
+  {"fieldname":"idempotency_key","label":"Idempotency Key","fieldtype":"Data","reqd":1,"unique":1,"no_copy":1},
+  {"fieldname":"payload_json","label":"Approved Provisioning Data (JSON)","fieldtype":"Code","options":"JSON","reqd":1},
+  {"fieldname":"section_status","label":"Provisioning State","fieldtype":"Section Break"},
+  {"fieldname":"service_status","label":"NMS Status Projection","fieldtype":"Select","options":"Requested\nApproved\nProvisioning\nActive\nFailed\nCancelled","default":"Requested","reqd":1,"read_only":1,"in_list_view":1},
+  {"fieldname":"external_service_id","label":"NMS Service Reference","fieldtype":"Data","read_only":1},
+  {"fieldname":"failure_summary","label":"Failure Summary","fieldtype":"Small Text","read_only":1}
+ ],"permissions":[
+  {"role":"System Manager","read":1,"write":1,"create":1,"submit":1,"delete":1,"report":1,"export":1},
+  {"role":"ISP Operations Manager","read":1,"write":1,"create":1,"submit":1,"report":1,"export":1},
+  {"role":"ISP Service Desk","read":1,"create":1,"report":1}
+ ]}

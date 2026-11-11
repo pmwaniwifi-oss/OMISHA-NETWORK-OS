@@ -1,0 +1,201 @@
+{
+ "doctype": "DocType",
+ "name": "ISP Installation Job",
+ "module": "ISP Operations",
+ "autoname": "hash",
+ "is_submittable": 1,
+ "track_changes": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "acquisition_request",
+  "assigned_technician",
+  "idempotency_key",
+  "section_install",
+  "installation_outcome",
+  "ont_vendor",
+  "ont_model",
+  "ont_serial",
+  "ont_mac",
+  "olt_reference",
+  "section_checks",
+  "fiber_connected",
+  "ont_powered",
+  "optical_test_passed",
+  "optical_rx_dbm",
+  "wan_link_up",
+  "section_closeout",
+  "failure_code",
+  "technician_notes",
+  "closeout_submitted_by",
+  "closeout_request_digest",
+  "completed_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "acquisition_request",
+   "label": "Acquisition Request",
+   "fieldtype": "Link",
+   "options": "ISP Acquisition Request",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "assigned_technician",
+   "label": "Assigned Technician",
+   "fieldtype": "Link",
+   "options": "User",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "idempotency_key",
+   "label": "Closeout Idempotency Key",
+   "fieldtype": "Data",
+   "reqd": 1,
+   "unique": 1,
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_install",
+   "label": "Fiber Installation",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "installation_outcome",
+   "label": "Installation Outcome",
+   "fieldtype": "Select",
+   "options": "Installed\nFailed\nNeeds Review",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "ont_vendor",
+   "label": "ONT/Router Vendor",
+   "fieldtype": "Data",
+   "reqd": 1
+  },
+  {
+   "fieldname": "ont_model",
+   "label": "ONT/Router Model",
+   "fieldtype": "Data",
+   "reqd": 1
+  },
+  {
+   "fieldname": "ont_serial",
+   "label": "ONT Serial Number",
+   "fieldtype": "Data",
+   "reqd": 1
+  },
+  {
+   "fieldname": "ont_mac",
+   "label": "ONT WAN MAC",
+   "fieldtype": "Data"
+  },
+  {
+   "fieldname": "olt_reference",
+   "label": "OLT/PON Port Reference",
+   "fieldtype": "Data"
+  },
+  {
+   "fieldname": "section_checks",
+   "label": "Installation Checks",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "fiber_connected",
+   "label": "Fiber Connected",
+   "fieldtype": "Check",
+   "default": "0"
+  },
+  {
+   "fieldname": "ont_powered",
+   "label": "ONT Powered",
+   "fieldtype": "Check",
+   "default": "0"
+  },
+  {
+   "fieldname": "optical_test_passed",
+   "label": "Optical Test Passed",
+   "fieldtype": "Check",
+   "default": "0"
+  },
+  {
+   "fieldname": "optical_rx_dbm",
+   "label": "Optical Receive Power (dBm)",
+   "fieldtype": "Float",
+   "precision": "3"
+  },
+  {
+   "fieldname": "wan_link_up",
+   "label": "WAN/Link Check Passed",
+   "fieldtype": "Check",
+   "default": "0"
+  },
+  {
+   "fieldname": "section_closeout",
+   "label": "Technician Closeout",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "failure_code",
+   "label": "Failure/Review Code",
+   "fieldtype": "Select",
+   "options": "\nNo Signal\nLow Optical Power\nONT Fault\nPort/Provisioning Issue\nCustomer Premises Access\nOther"
+  },
+  {
+   "fieldname": "technician_notes",
+   "label": "Technician Notes",
+   "fieldtype": "Small Text"
+  },
+  {
+   "fieldname": "closeout_submitted_by",
+   "label": "Closeout Submitted By",
+   "fieldtype": "Link",
+   "options": "User",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "closeout_request_digest",
+   "label": "Closeout Request Digest",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "no_copy": 1,
+   "hidden": 1
+  },
+  {
+   "fieldname": "completed_at",
+   "label": "Completed At",
+   "fieldtype": "Datetime",
+   "read_only": 1
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "submit": 1,
+   "cancel": 1,
+   "report": 1
+  },
+  {
+   "role": "ISP Operations Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "submit": 1,
+   "report": 1
+  },
+  {
+   "role": "ISP Technician",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "submit": 1,
+   "report": 1
+  }
+ ]
+}

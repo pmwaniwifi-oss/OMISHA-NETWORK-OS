@@ -1,0 +1,15 @@
+[submodule "frappe"]
+	path = upstream/frappe
+	url = https://github.com/frappe/frappe.git
+
+[submodule "erpnext"]
+	path = upstream/erpnext
+	url = https://github.com/frappe/erpnext.git
+
+[submodule "frappe_docker"]
+	path = upstream/frappe_docker
+	url = https://github.com/frappe/frappe_docker.git
+
+[submodule "nms"]
+	path = upstream/nms
+	url = https://github.com/cablelabs/os-provisioning.git

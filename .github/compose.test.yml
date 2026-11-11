@@ -1,0 +1,4 @@
+services:
+  licensing:
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m

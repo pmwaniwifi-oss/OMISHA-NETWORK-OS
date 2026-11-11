@@ -1,0 +1,1406 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter/services.dart';
+
+import 'api.dart';
+
+const _apiBaseUrl = String.fromEnvironment('OMISHA_API_BASE_URL');
+const _googleServerClientId = String.fromEnvironment('OMISHA_GOOGLE_SERVER_CLIENT_ID');
+const _googleIdentityChannel = MethodChannel('com.omisha.network_os/google_identity');
+const _sessionKey = 'omisha.scoped_access_token';
+const _identitySessionKey = 'omisha.identity_session_token';
+
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const OmishaApp());
+}
+
+class OmishaApp extends StatefulWidget {
+  const OmishaApp({super.key});
+
+  @override
+  State<OmishaApp> createState() => _OmishaAppState();
+}
+
+class _OmishaAppState extends State<OmishaApp> {
+  final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
+  late final OmishaApi? _api;
+  String? _configurationError;
+  String? _identityToken;
+  String? _error;
+  bool _enrollmentPending = false;
+  List<WorkspaceContext> _contexts = const [];
+  ApiSession? _session;
+  bool _busy = true;
+
+  @override
+  void initState() {
+    super.initState();
+    try {
+      _api = OmishaApi(_apiBaseUrl);
+    } on ApiException catch (exception) {
+      _api = null;
+      _configurationError = exception.message;
+    }
+    _restoreSession();
+  }
+
+  Future<void> _restoreSession() async {
+    if (_api == null) {
+      setState(() => _busy = false);
+      return;
+    }
+    try {
+      final token = await _secureStorage.read(key: _sessionKey);
+      final identityToken = await _secureStorage.read(key: _identitySessionKey);
+      if (token != null && token.isNotEmpty && identityToken != null && identityToken.isNotEmpty) {
+        final restored = await _api.resumeSession(
+          accessToken: token,
+          identityToken: identityToken,
+        );
+        if (!mounted) return;
+        setState(() {
+          _session = restored;
+          _busy = false;
+        });
+        return;
+      }
+      if (token != null || identityToken != null) {
+        await _secureStorage.delete(key: _sessionKey);
+        await _secureStorage.delete(key: _identitySessionKey);
+      }
+    } on ApiException catch (exception) {
+      if (exception.statusCode == 401) {
+        await _secureStorage.delete(key: _sessionKey);
+        await _secureStorage.delete(key: _identitySessionKey);
+      }
+      _error = exception.message;
+    } catch (_) {
+      _error = 'Could not restore the saved sign-in session.';
+    }
+    if (!mounted) return;
+    setState(() => _busy = false);
+  }
+
+  Future<void> _signInWithGoogle() async {
+    final api = _api;
+    if (api == null) return;
+    if (_googleServerClientId.isEmpty) {
+      setState(() {
+        _error = 'Google sign-in is not configured for this build yet.';
+      });
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final challenge = await api.startGoogleChallenge();
+      final googleIdToken = await _googleIdentityChannel.invokeMethod<String>(
+        'googleIdToken',
+        {
+          'serverClientId': _googleServerClientId,
+          'nonce': challenge.nonce,
+        },
+      );
+      if (googleIdToken == null || googleIdToken.isEmpty) {
+        throw const ApiException('Google did not return a sign-in token.');
+      }
+      final identityToken = await api.exchangeGoogleIdToken(
+        googleIdToken: googleIdToken,
+        challengeId: challenge.id,
+        nonce: challenge.nonce,
+      );
+      await _finishIdentityAuthentication(identityToken);
+    } catch (exception) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = _safeMessage(exception);
+      });
+    }
+  }
+
+  Future<void> _redeemInvitationToken(String invitationToken) async {
+    final api = _api;
+    final identityToken = _identityToken;
+    if (api == null || identityToken == null) return;
+    final token = invitationToken.trim();
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final result = await api.redeemInvitation(
+        identityToken: identityToken,
+        invitationToken: token,
+      );
+      if (result['status'] == 'pending_onboarding') {
+        if (!mounted) return;
+        setState(() {
+          _enrollmentPending = true;
+          _busy = false;
+        });
+        return;
+      }
+      if (result['status'] != 'active') {
+        throw const ApiException('The invitation could not be accepted.');
+      }
+      final contexts = await api.listContexts(identityToken);
+      if (contexts.isEmpty) {
+        throw const ApiException('Invitation accepted, but no active workspace is available.');
+      }
+      if (!mounted) return;
+      setState(() {
+        _contexts = contexts;
+        _enrollmentPending = false;
+        _busy = false;
+      });
+      if (contexts.length == 1) {
+        await _activateContext(contexts.single);
+      }
+    } catch (exception) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = _safeMessage(exception);
+      });
+    }
+  }
+
+  Future<String?> _chooseInvitationRole(List<String> roles) {
+    return showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Create invitation'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final role in roles)
+              ListTile(
+                title: Text(role),
+                onTap: () => Navigator.of(dialogContext).pop(role),
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openInvitationManagement() async {
+    final api = _api;
+    final session = _session;
+    if (api == null || session == null) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    List<WorkspaceInvitation> invitations;
+    try {
+      invitations = await api.listWorkspaceInvitations(session.accessToken);
+    } catch (exception) {
+      if (mounted) setState(() {
+        _busy = false;
+        _error = _safeMessage(exception);
+      });
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _busy = false);
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        var current = invitations;
+        var loading = false;
+        String? dialogError;
+        return StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: const Text('Workspace invitations'),
+            content: SizedBox(
+              width: 480,
+              height: 420,
+              child: loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : Column(
+                      children: [
+                        if (dialogError != null) _InlineError(dialogError!),
+                        Expanded(
+                          child: current.isEmpty
+                              ? const Center(child: Text('No invitations found.'))
+                              : ListView.builder(
+                                  itemCount: current.length,
+                                  itemBuilder: (context, index) {
+                                    final item = current[index];
+                                    return ListTile(
+                                      title: Text(item.roleCode),
+                                      subtitle: Text('${item.status} · expires ${item.expiresAt.toLocal()}'),
+                                      trailing: item.status == 'pending'
+                                          ? IconButton(
+                                              tooltip: 'Revoke invitation',
+                                              icon: const Icon(Icons.block_outlined),
+                                              onPressed: () async {
+                                                setDialogState(() {
+                                                  loading = true;
+                                                  dialogError = null;
+                                                });
+                                                try {
+                                                  await api.revokeWorkspaceInvitation(
+                                                    accessToken: session.accessToken,
+                                                    invitationId: item.id,
+                                                  );
+                                                  current = await api.listWorkspaceInvitations(session.accessToken);
+                                                } catch (exception) {
+                                                  dialogError = _safeMessage(exception);
+                                                } finally {
+                                                  setDialogState(() => loading = false);
+                                                }
+                                              },
+                                            )
+                                          : null,
+                                    );
+                                  },
+                                ),
+                        ),
+                      ],
+                    ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('Close'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _createInvitation() async {
+    final api = _api;
+    final session = _session;
+    if (api == null || session == null) return;
+    final roles = session.context.roleLabels;
+    late final InvitationResult invitation;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      if (session.context.workspace == 'omisha_workspace' &&
+          roles.contains('omisha.platform_admin')) {
+        final action = await showDialog<String>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('OMISHA invitations'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  title: const Text('Add ISP organization'),
+                  subtitle: const Text('Create tenant and invite its first owner'),
+                  onTap: () => Navigator.of(dialogContext).pop('isp'),
+                ),
+                ListTile(
+                  title: const Text('Invite OMISHA staff'),
+                  onTap: () => Navigator.of(dialogContext).pop('staff'),
+                ),
+              ],
+            ),
+          ),
+        );
+        if (action == null) return;
+        if (action == 'isp') {
+          final controller = TextEditingController();
+          final label = await showDialog<String>(
+            context: context,
+            builder: (dialogContext) => AlertDialog(
+              title: const Text('Add ISP organization'),
+              content: TextField(
+                controller: controller,
+                autofocus: true,
+                maxLength: 120,
+                decoration: const InputDecoration(labelText: 'ISP / organization name'),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(controller.text.trim()),
+                  child: const Text('Create ISP invite'),
+                ),
+              ],
+            ),
+          );
+          controller.dispose();
+          if (label == null || label.isEmpty) return;
+          invitation = await api.createISP(
+            accessToken: session.accessToken,
+            displayLabel: label,
+          );
+        } else {
+          invitation = await api.createWorkspaceInvitation(
+            accessToken: session.accessToken,
+            roleCode: 'omisha.staff',
+          );
+        }
+      } else {
+        final rolesToInvite = <String>[
+          if (roles.contains('isp.owner')) 'isp.admin',
+          'isp.technician',
+          'isp.sales',
+          'isp.support',
+          'isp.finance',
+          'isp.customer',
+        ];
+        final role = await _chooseInvitationRole(rolesToInvite);
+        if (role == null) {
+          if (mounted) setState(() => _busy = false);
+          return;
+        }
+        invitation = await api.createWorkspaceInvitation(
+          accessToken: session.accessToken,
+          roleCode: role,
+        );
+      }
+      final shareText = 'OMISHA NETWORK OS invitation\\n'
+          'Organization: ${invitation.organization}\\n'
+          'Role: ${invitation.roleCode}\\n'
+          'Expires: ${invitation.expiresAt}\\n\\n'
+          'Invitation token (keep private):\\n${invitation.token}\\n\\n'
+          'Open OMISHA NETWORK OS, sign in with Google, and enter this invitation token.';
+      await _googleIdentityChannel.invokeMethod<void>(
+        'shareInvitation',
+        {'text': shareText},
+      );
+    } catch (exception) {
+      if (mounted) setState(() => _error = _safeMessage(exception));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _finishIdentityAuthentication(String identityToken) async {
+    final api = _api;
+    if (api == null) {
+      if (mounted) setState(() {
+        _busy = false;
+        _error = 'The sign-in service is not configured.';
+      });
+      return;
+    }
+    try {
+      final contexts = await api.listContexts(identityToken);
+      if (!mounted) return;
+      setState(() {
+        _identityToken = identityToken;
+        _contexts = contexts;
+        _enrollmentPending = false;
+        _busy = false;
+      });
+      if (contexts.isEmpty) return;
+      if (contexts.length == 1) {
+        await _activateContext(contexts.single);
+      }
+    } catch (exception) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = _safeMessage(exception);
+      });
+    }
+  }
+
+  Future<void> _activateContext(WorkspaceContext context) async {
+    final identityToken = _identityToken;
+    if (_api == null || identityToken == null) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final session = await _api.activateContext(
+        identityToken: identityToken,
+        context: context,
+      );
+      await _secureStorage.write(key: _sessionKey, value: session.accessToken);
+      await _secureStorage.write(key: _identitySessionKey, value: session.identityToken);
+      if (!mounted) return;
+      setState(() {
+        _session = session;
+        _identityToken = null;
+        _contexts = const [];
+        _busy = false;
+      });
+    } catch (exception) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = _safeMessage(exception);
+      });
+    }
+  }
+
+  Future<void> _openOperations() async {
+    final api = _api;
+    final session = _session;
+    if (api == null || session == null) return;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => _OperationsLookupPage(
+          api: api,
+          accessToken: session.accessToken,
+          roles: session.context.roleLabels,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openInstallationJobs() async {
+    final api = _api;
+    final session = _session;
+    if (api == null || session == null) return;
+    await Navigator.of(context).push<void>(MaterialPageRoute(
+      builder: (_) => _InstallationJobsPage(api: api, accessToken: session.accessToken),
+    ));
+  }
+
+  Future<void> _openContextPicker() async {
+    final session = _session;
+    if (_api == null || session == null) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final contexts = await _api.listContexts(session.identityToken);
+      if (!mounted) return;
+      if (contexts.isEmpty) {
+        throw const ApiException('No active account access is assigned to this sign-in.');
+      }
+      setState(() {
+        _identityToken = session.identityToken;
+        _contexts = contexts;
+        _busy = false;
+      });
+    } catch (exception) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = _safeMessage(exception);
+      });
+    }
+  }
+
+  Future<void> _logout() async {
+    final session = _session;
+    final api = _api;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final identityToken = session?.identityToken ?? _identityToken;
+      if (identityToken != null && api != null) {
+        await api.logout(identityToken);
+      }
+      try {
+        await _googleIdentityChannel.invokeMethod<void>('clearCredentialState');
+      } catch (_) {
+        // The OMISHA server session is still cleared locally even if provider cleanup fails.
+      }
+    } catch (_) {
+      // Always clear local credentials; revocation is retried/handled server-side.
+    } finally {
+      await _secureStorage.delete(key: _sessionKey);
+      await _secureStorage.delete(key: _identitySessionKey);
+      if (!mounted) return;
+      setState(() {
+        _session = null;
+        _identityToken = null;
+        _enrollmentPending = false;
+        _contexts = const [];
+          _busy = false;
+      });
+    }
+  }
+
+  void _cancelContextPicker() {
+    setState(() {
+      _identityToken = null;
+      _enrollmentPending = false;
+      _contexts = const [];
+      _error = null;
+    });
+  }
+
+  String _safeMessage(Object exception) {
+    if (exception is ApiException) return exception.message;
+    return 'The request could not be completed. Please try again.';
+  }
+
+  @override
+  void dispose() {
+    _api?.close();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'OMISHA NETWORK OS',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF075B55),
+          brightness: Brightness.light,
+        ),
+        scaffoldBackgroundColor: const Color(0xFFF5F8F7),
+        cardTheme: const CardThemeData(
+          elevation: 0,
+          margin: EdgeInsets.zero,
+          color: Colors.white,
+        ),
+      ),
+      home: _buildHome(),
+    );
+  }
+
+  bool get _canOpenOperations {
+    final roles = _session?.context.roleLabels ?? const <String>[];
+    return roles.contains('isp.owner') || roles.contains('isp.admin') || roles.contains('isp.support');
+  }
+
+  bool get _canOpenInstallationJobs =>
+      (_session?.context.roleLabels ?? const <String>[]).contains('isp.technician');
+
+  bool get _canCreateInvitation {
+    final roles = _session?.context.roleLabels ?? const <String>[];
+    return roles.contains('omisha.platform_admin') ||
+        roles.contains('isp.owner') ||
+        roles.contains('isp.admin');
+  }
+
+  Widget _buildHome() {
+    if (_busy) return const _LoadingPage();
+    if (_configurationError != null) {
+      return _MessagePage(
+        title: 'OMISHA NETWORK OS',
+        message: _configurationError!,
+        detail: 'Configure OMISHA_API_BASE_URL at build time. Do not use a public or production HTTP endpoint.',
+      );
+    }
+    final session = _session;
+    if (_identityToken != null && _contexts.isEmpty) {
+      return _InvitationAcceptPage(
+        pending: _enrollmentPending,
+        error: _error,
+        onRedeem: _redeemInvitationToken,
+        onLogout: _logout,
+      );
+    }
+    if (_contexts.isNotEmpty && _identityToken != null) {
+      return _ContextPickerPage(
+        contexts: _contexts,
+        error: _error,
+        onSelect: _activateContext,
+        onCancel: _cancelContextPicker,
+        canReturnToWorkspace: _session != null,
+      );
+    }
+    if (session != null) {
+      return _WorkspacePage(
+        contextInfo: session.context,
+        error: _error,
+        onSwitch: _openContextPicker,
+        onLogout: _logout,
+        onCreateInvitation: _canCreateInvitation ? _createInvitation : null,
+        onManageInvitations: _canCreateInvitation ? _openInvitationManagement : null,
+        onOpenOperations: _canOpenOperations ? _openOperations : null,
+        onOpenInstallationJobs: _canOpenInstallationJobs ? _openInstallationJobs : null,
+      );
+    }
+    return _SignInPage(
+      googleEnabled: _googleServerClientId.isNotEmpty,
+      busy: _busy,
+      error: _error,
+      onGoogleSignIn: _signInWithGoogle,
+    );
+  }
+}
+
+class _LoadingPage extends StatelessWidget {
+  const _LoadingPage();
+
+  @override
+  Widget build(BuildContext context) => const Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text('OMISHA NETWORK OS'),
+            ],
+          ),
+        ),
+      );
+}
+
+class _SignInPage extends StatelessWidget {
+  const _SignInPage({
+    required this.googleEnabled,
+    required this.busy,
+    required this.error,
+    required this.onGoogleSignIn,
+  });
+
+  final bool googleEnabled;
+  final bool busy;
+  final String? error;
+  final Future<void> Function() onGoogleSignIn;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 460),
+              child: Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(28),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        width: 54,
+                        height: 54,
+                        decoration: BoxDecoration(
+                          color: colors.primary,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: const Icon(Icons.hub_outlined, color: Colors.white, size: 30),
+                      ),
+                      const SizedBox(height: 24),
+                      Text('OMISHA NETWORK OS', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800, letterSpacing: 1)),
+                      const SizedBox(height: 8),
+                      Text('Sign in with Google', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
+                      const SizedBox(height: 8),
+                      const Text('Customers, ISP users and OMISHA staff all use Google sign-in. Your approved workspaces and access are assigned by OMISHA and your ISP administrator.'),
+                      const SizedBox(height: 24),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: busy || !googleEnabled ? null : onGoogleSignIn,
+                          icon: const Icon(Icons.account_circle_outlined),
+                          label: Text(googleEnabled
+                              ? 'Continue with Google'
+                              : 'Google sign-in setup required'),
+                        ),
+                      ),
+                      if (busy) ...[
+                        const SizedBox(height: 16),
+                        const LinearProgressIndicator(),
+                      ],
+                      if (error != null) ...[
+                        const SizedBox(height: 16),
+                        _InlineError(error!),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _InvitationAcceptPage extends StatefulWidget {
+  const _InvitationAcceptPage({
+    required this.pending,
+    required this.error,
+    required this.onRedeem,
+    required this.onLogout,
+  });
+
+  final bool pending;
+  final String? error;
+  final Future<void> Function(String token) onRedeem;
+  final VoidCallback onLogout;
+
+  @override
+  State<_InvitationAcceptPage> createState() => _InvitationAcceptPageState();
+}
+
+class _InvitationAcceptPageState extends State<_InvitationAcceptPage> {
+  final _tokenController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _tokenController.addListener(() {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _tokenController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('OMISHA NETWORK OS'),
+        actions: [
+          IconButton(tooltip: 'Sign out', onPressed: widget.onLogout, icon: const Icon(Icons.logout)),
+        ],
+      ),
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 460),
+              child: Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.pending ? 'Onboarding is pending' : 'Accept your invitation',
+                        style: Theme.of(context).textTheme.headlineSmall,
+                      ),
+                      const SizedBox(height: 12),
+                      Text(widget.pending
+                          ? 'Your customer invitation is recorded. ISP verification, serviceability and payment checks must finish before service access is activated.'
+                          : 'Sign-in is verified. Paste the private invitation token sent by your ISP or OMISHA administrator.'),
+                      const SizedBox(height: 18),
+                      TextField(
+                        controller: _tokenController,
+                        maxLength: 128,
+                        autocorrect: false,
+                        enableSuggestions: false,
+                        decoration: const InputDecoration(
+                          labelText: 'Invitation token',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      if (widget.error != null) ...[
+                        const SizedBox(height: 12),
+                        _InlineError(widget.error!),
+                      ],
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton(
+                          onPressed: _tokenController.text.trim().length < 40
+                              ? null
+                              : () => widget.onRedeem(_tokenController.text),
+                          child: const Text('Accept invitation'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ContextPickerPage extends StatelessWidget {
+  const _ContextPickerPage({
+    required this.contexts,
+    required this.error,
+    required this.onSelect,
+    required this.onCancel,
+    required this.canReturnToWorkspace,
+  });
+
+  final List<WorkspaceContext> contexts;
+  final String? error;
+  final Future<void> Function(WorkspaceContext context) onSelect;
+  final VoidCallback onCancel;
+  final bool canReturnToWorkspace;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Choose your workspace'), leading: IconButton(onPressed: onCancel, icon: const Icon(Icons.arrow_back))),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          const Text('These workspaces were returned for your verified sign-in. Selecting one does not add permissions.'),
+          const SizedBox(height: 16),
+          if (error != null) _InlineError(error!),
+          for (final workspace in contexts)
+            Card(
+              margin: const EdgeInsets.only(bottom: 12),
+              child: ListTile(
+                contentPadding: const EdgeInsets.all(16),
+                leading: const CircleAvatar(child: Icon(Icons.business_outlined)),
+                title: Text(workspace.organization, style: const TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: Text('${workspace.workspace} · ${workspace.roleLabels.join(', ')}'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => onSelect(workspace),
+              ),
+            ),
+          TextButton(
+            onPressed: onCancel,
+            child: Text(canReturnToWorkspace ? 'Return to current workspace' : 'Cancel sign-in'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _WorkspacePage extends StatelessWidget {
+  const _WorkspacePage({
+    required this.contextInfo,
+    required this.error,
+    required this.onSwitch,
+    required this.onLogout,
+    required this.onCreateInvitation,
+    required this.onManageInvitations,
+    required this.onOpenOperations,
+    required this.onOpenInstallationJobs,
+  });
+
+  final WorkspaceContext contextInfo;
+  final String? error;
+  final VoidCallback onSwitch;
+  final VoidCallback onLogout;
+  final VoidCallback? onCreateInvitation;
+  final VoidCallback? onManageInvitations;
+  final VoidCallback? onOpenOperations;
+  final VoidCallback? onOpenInstallationJobs;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final capabilities = contextInfo.capabilities.toSet().toList()..sort();
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('OMISHA NETWORK OS'),
+        actions: [
+          IconButton(tooltip: 'Switch workspace', onPressed: onSwitch, icon: const Icon(Icons.swap_horiz)),
+          IconButton(tooltip: 'Sign out', onPressed: onLogout, icon: const Icon(Icons.logout)),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(contextInfo.organization, style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 6),
+                  Text('${contextInfo.workspace} workspace'),
+                  const SizedBox(height: 14),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: contextInfo.roleLabels.map((role) => Chip(label: Text(role))).toList(),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (error != null) ...[
+            const SizedBox(height: 12),
+            _InlineError(error!),
+          ],
+          const SizedBox(height: 20),
+          Text('Your access', style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 10),
+          if (capabilities.isEmpty)
+            const Card(child: ListTile(title: Text('No active modules are assigned to this workspace.')))
+          else
+            for (final capability in capabilities)
+              Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: ListTile(
+                  leading: const Icon(Icons.verified_user_outlined),
+                  title: Text(_friendlyCapability(capability)),
+                  subtitle: Text(capability),
+                ),
+              ),
+          if (onCreateInvitation != null) ...[
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: onCreateInvitation,
+                icon: const Icon(Icons.person_add_alt_1),
+                label: const Text('Create invitation'),
+              ),
+            ),
+          ],
+          if (onOpenOperations != null) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: onOpenOperations,
+                icon: const Icon(Icons.settings_ethernet_outlined),
+                label: const Text('ISP service operations'),
+              ),
+            ),
+          ],
+          if (onOpenInstallationJobs != null) ...[
+            const SizedBox(height: 8),
+            SizedBox(width: double.infinity, child: OutlinedButton.icon(
+              onPressed: onOpenInstallationJobs,
+              icon: const Icon(Icons.handyman_outlined),
+              label: const Text('My fiber installation jobs'),
+            )),
+          ],
+          if (onManageInvitations != null) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: onManageInvitations,
+                icon: const Icon(Icons.manage_accounts_outlined),
+                label: const Text('Manage invitations'),
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+          const Text('Screens and actions are only a user interface. The OMISHA API must enforce every permission and tenant boundary on every request.'),
+        ],
+      ),
+    );
+  }
+
+  String _friendlyCapability(String capability) {
+    return capability
+        .split(RegExp(r'[._-]'))
+        .where((part) => part.isNotEmpty)
+        .map((part) => '${part[0].toUpperCase()}${part.substring(1)}')
+        .join(' ');
+  }
+}
+
+class _MessagePage extends StatelessWidget {
+  const _MessagePage({
+    required this.title,
+    required this.message,
+    required this.detail,
+  });
+
+  final String title;
+  final String message;
+  final String detail;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 520),
+              child: Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.settings_ethernet, size: 38),
+                      const SizedBox(height: 16),
+                      Text(title, style: Theme.of(context).textTheme.titleLarge),
+                      const SizedBox(height: 12),
+                      Text(message),
+                      const SizedBox(height: 8),
+                      Text(detail, style: Theme.of(context).textTheme.bodySmall),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+}
+
+
+class _OperationsLookupPage extends StatefulWidget {
+  const _OperationsLookupPage({
+    required this.api,
+    required this.accessToken,
+    required this.roles,
+  });
+
+  final OmishaApi api;
+  final String accessToken;
+  final List<String> roles;
+
+  @override
+  State<_OperationsLookupPage> createState() => _OperationsLookupPageState();
+}
+
+class _OperationsLookupPageState extends State<_OperationsLookupPage> {
+  final _reference = TextEditingController();
+  String _kind = 'acquisition';
+  String? _result;
+  String? _error;
+  bool _busy = false;
+
+  bool get _canReadNMS =>
+      widget.roles.contains('isp.owner') || widget.roles.contains('isp.admin');
+
+  @override
+  void dispose() {
+    _reference.dispose();
+    super.dispose();
+  }
+
+  Future<void> _lookup() async {
+    final reference = _reference.text.trim();
+    if (reference.isEmpty) {
+      setState(() => _error = 'Enter a record reference.');
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+      _result = null;
+    });
+    try {
+      if (_kind == 'acquisition') {
+        final item = await widget.api.getAcquisitionProgress(
+          accessToken: widget.accessToken,
+          acquisitionId: reference,
+        );
+        _result = 'Onboarding status: ${item.status}\n'
+            'Plan: ${item.plan}\nIdentity check: ${item.identityStatus}\n'
+            'Payment request: ${item.paymentRequest ?? 'Not created'}\n'
+            'Service order: ${item.serviceOrder ?? 'Not created'}';
+      } else if (_kind == 'service_order') {
+        final item = await widget.api.getServiceOrder(
+          accessToken: widget.accessToken,
+          serviceOrderId: reference,
+        );
+        _result = 'Service status: ${item.status}\nPlan: ${item.plan}\n'
+            'NMS service reference: ${item.externalServiceId ?? 'Not assigned'}';
+      } else {
+        final item = await widget.api.getNMSContractReference(
+          accessToken: widget.accessToken,
+          number: reference,
+        );
+        _result = 'NMS contract number: ${item.number}\n'
+            'NMS record ID: ${item.nmsId}';
+      }
+    } catch (exception) {
+      _error = exception is ApiException
+          ? exception.message
+          : 'The request could not be completed.';
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final options = <String, String>{
+      'acquisition': 'Customer onboarding',
+      'service_order': 'Service order',
+      if (_canReadNMS) 'nms_contract': 'NMS contract reference',
+    };
+    if (!options.containsKey(_kind)) _kind = options.keys.first;
+    return Scaffold(
+      appBar: AppBar(title: const Text('ISP service operations')),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
+            const Text(
+              'Staff lookup only. The server checks your active ISP role and tenant on every request.',
+            ),
+            const SizedBox(height: 16),
+            DropdownButtonFormField<String>(
+              initialValue: _kind,
+              decoration: const InputDecoration(
+                labelText: 'Record type',
+                border: OutlineInputBorder(),
+              ),
+              items: options.entries
+                  .map((entry) => DropdownMenuItem(
+                        value: entry.key,
+                        child: Text(entry.value),
+                      ))
+                  .toList(growable: false),
+              onChanged: _busy
+                  ? null
+                  : (value) {
+                      if (value != null) setState(() => _kind = value);
+                    },
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _reference,
+              maxLength: _kind == 'nms_contract' ? 64 : 140,
+              autocorrect: false,
+              decoration: const InputDecoration(
+                labelText: 'Record reference',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 8),
+            FilledButton.icon(
+              onPressed: _busy ? null : _lookup,
+              icon: const Icon(Icons.search),
+              label: const Text('Look up'),
+            ),
+            if (_busy) ...[
+              const SizedBox(height: 16),
+              const LinearProgressIndicator(),
+            ],
+            if (_error != null) ...[
+              const SizedBox(height: 16),
+              _InlineError(_error!),
+            ],
+            if (_result != null) ...[
+              const SizedBox(height: 16),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: SelectableText(_result!),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _InstallationJobsPage extends StatefulWidget {
+  const _InstallationJobsPage({required this.api, required this.accessToken});
+  final OmishaApi api;
+  final String accessToken;
+
+  @override
+  State<_InstallationJobsPage> createState() => _InstallationJobsPageState();
+}
+
+class _InstallationJobsPageState extends State<_InstallationJobsPage> {
+  List<InstallationJob> _jobs = const [];
+  final Map<String, int> _nmsMatches = {};
+  final Map<String, String> _nmsErrors = {};
+  final Set<String> _nmsBusy = {};
+  String? _error;
+  bool _busy = false;
+
+  @override
+  void initState() { super.initState(); _load(); }
+
+  Future<void> _load() async {
+    setState(() { _busy = true; _error = null; });
+    try {
+      final jobs = await widget.api.getMyInstallationJobs(accessToken: widget.accessToken);
+      if (mounted) setState(() => _jobs = jobs);
+    } catch (error) {
+      if (mounted) setState(() => _error = error is ApiException ? error.message : 'Could not load installation jobs.');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _lookupNMS(InstallationJob job) async {
+    setState(() { _nmsBusy.add(job.id); _nmsErrors.remove(job.id); });
+    try {
+      final reference = await widget.api.getNMSReferenceForInstallationJob(
+        accessToken: widget.accessToken, jobId: job.id,
+      );
+      if (mounted) setState(() => _nmsMatches[job.id] = reference.modemId);
+    } catch (error) {
+      if (mounted) setState(() => _nmsErrors[job.id] = error is ApiException ? error.message : 'NMS device lookup failed.');
+    } finally {
+      if (mounted) setState(() => _nmsBusy.remove(job.id));
+    }
+  }
+
+  Future<void> _closeout(InstallationJob job) async {
+    final closeout = await showDialog<InstallationCloseout>(
+      context: context,
+      builder: (_) => _InstallationCloseoutDialog(job: job),
+    );
+    if (closeout == null || !mounted) return;
+    setState(() { _nmsErrors.remove(job.id); _busy = true; });
+    try {
+      await widget.api.submitInstallationCloseout(
+        accessToken: widget.accessToken, jobId: job.id, closeout: closeout,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Installation closeout submitted to ISP operations.')));
+      await _load();
+    } catch (error) {
+      if (mounted) setState(() => _error = error is ApiException ? error.message : 'Closeout could not be submitted.');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('My fiber installation jobs'), actions: [
+      IconButton(onPressed: _busy ? null : _load, icon: const Icon(Icons.refresh), tooltip: 'Refresh'),
+    ]),
+    body: _busy && _jobs.isEmpty ? const Center(child: CircularProgressIndicator()) : ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        const Text('Assigned open jobs from the ISP operations system. Closeout submission will be added after the API workflow is validated.'),
+        if (_error != null) ...[const SizedBox(height: 12), _InlineError(_error!)],
+        if (!_busy && _error == null && _jobs.isEmpty) const Card(child: ListTile(title: Text('No open jobs assigned.'))),
+        for (final job in _jobs) Card(margin: const EdgeInsets.only(top: 12), child: Padding(
+          padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(job.id, style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            Text('Acquisition: ${job.acquisition}'),
+            Text('ONT serial: ${job.ontSerial}'),
+            if (job.ontMac.isNotEmpty) Text('ONT MAC: ${job.ontMac}'),
+            if (job.oltReference.isNotEmpty) Text('OLT/PON: ${job.oltReference}'),
+            const SizedBox(height: 8),
+            Text('Checks: fiber ${job.fiberConnected ? '✓' : '—'} · power ${job.ontPowered ? '✓' : '—'} · optical ${job.opticalTestPassed ? '✓' : '—'} · WAN ${job.wanLinkUp ? '✓' : '—'}'),
+            if (job.opticalRxDbm != null) Text('Optical RX: ${job.opticalRxDbm} dBm'),
+            const SizedBox(height: 8),
+            FilledButton.icon(
+              onPressed: _busy ? null : () => _closeout(job),
+              icon: const Icon(Icons.assignment_turned_in_outlined),
+              label: const Text('Submit installation closeout'),
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: _nmsBusy.contains(job.id) ? null : () => _lookupNMS(job),
+              icon: _nmsBusy.contains(job.id) ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.hub_outlined),
+              label: const Text('Match device in NMS Prime'),
+            ),
+            if (_nmsMatches.containsKey(job.id)) Text('Exact ONT MAC match: NMS modem #${_nmsMatches[job.id]}'),
+            if (_nmsErrors.containsKey(job.id)) _InlineError(_nmsErrors[job.id]!),
+          ]),
+        )),
+      ],
+    ),
+  );
+}
+
+class _InstallationCloseoutDialog extends StatefulWidget {
+  const _InstallationCloseoutDialog({required this.job});
+  final InstallationJob job;
+
+  @override
+  State<_InstallationCloseoutDialog> createState() => _InstallationCloseoutDialogState();
+}
+
+class _InstallationCloseoutDialogState extends State<_InstallationCloseoutDialog> {
+  late final TextEditingController _vendor = TextEditingController(text: widget.job.ontVendor);
+  late final TextEditingController _model = TextEditingController(text: widget.job.ontModel);
+  late final TextEditingController _serial = TextEditingController(text: widget.job.ontSerial);
+  late final TextEditingController _mac = TextEditingController(text: widget.job.ontMac);
+  late final TextEditingController _olt = TextEditingController(text: widget.job.oltReference);
+  late final TextEditingController _rx = TextEditingController(text: widget.job.opticalRxDbm?.toString() ?? '');
+  late final TextEditingController _notes = TextEditingController();
+  String _outcome = 'Installed';
+  String _failure = '';
+  bool _fiber = false, _powered = false, _optical = false, _wan = false;
+
+  @override
+  void dispose() {
+    for (final controller in [_vendor, _model, _serial, _mac, _olt, _rx, _notes]) { controller.dispose(); }
+    super.dispose();
+  }
+
+  void _submit() {
+    final rx = _rx.text.trim().isEmpty ? null : double.tryParse(_rx.text.trim());
+    if (_vendor.text.trim().isEmpty || _model.text.trim().isEmpty || _serial.text.trim().isEmpty ||
+        (_rx.text.trim().isNotEmpty && rx == null) || (_outcome == 'Installed' && (!_fiber || !_powered || !_optical || !_wan || rx == null)) ||
+        (_outcome != 'Installed' && (_failure.isEmpty || _notes.text.trim().isEmpty))) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Complete the required device details and checks for this outcome.')));
+      return;
+    }
+    Navigator.of(context).pop(InstallationCloseout(
+      outcome: _outcome, ontVendor: _vendor.text.trim(), ontModel: _model.text.trim(),
+      ontSerial: _serial.text.trim(), ontMac: _mac.text.trim(), oltReference: _olt.text.trim(),
+      fiberConnected: _fiber, ontPowered: _powered, opticalTestPassed: _optical,
+      opticalRxDbm: rx, wanLinkUp: _wan, failureCode: _failure, technicianNotes: _notes.text.trim(),
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Installation closeout'),
+    content: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 520), child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+      DropdownButtonFormField<String>(initialValue: _outcome, decoration: const InputDecoration(labelText: 'Outcome'),
+        items: const [DropdownMenuItem(value: 'Installed', child: Text('Installed')), DropdownMenuItem(value: 'Failed', child: Text('Failed')), DropdownMenuItem(value: 'Needs Review', child: Text('Needs review'))],
+        onChanged: (value) { if (value != null) setState(() => _outcome = value); }),
+      TextField(controller: _vendor, maxLength: 128, decoration: const InputDecoration(labelText: 'ONT vendor')),
+      TextField(controller: _model, maxLength: 128, decoration: const InputDecoration(labelText: 'ONT model')),
+      TextField(controller: _serial, maxLength: 128, decoration: const InputDecoration(labelText: 'ONT serial')),
+      TextField(controller: _mac, maxLength: 32, decoration: const InputDecoration(labelText: 'ONT WAN MAC')),
+      TextField(controller: _olt, maxLength: 128, decoration: const InputDecoration(labelText: 'OLT / PON port')),
+      CheckboxListTile(value: _fiber, title: const Text('Fiber connected'), onChanged: (value) => setState(() => _fiber = value ?? false)),
+      CheckboxListTile(value: _powered, title: const Text('ONT powered'), onChanged: (value) => setState(() => _powered = value ?? false)),
+      CheckboxListTile(value: _optical, title: const Text('Optical test passed'), onChanged: (value) => setState(() => _optical = value ?? false)),
+      TextField(controller: _rx, keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true), decoration: const InputDecoration(labelText: 'Optical RX (dBm)')),
+      CheckboxListTile(value: _wan, title: const Text('WAN / link check passed'), onChanged: (value) => setState(() => _wan = value ?? false)),
+      if (_outcome != 'Installed') DropdownButtonFormField<String>(initialValue: _failure, decoration: const InputDecoration(labelText: 'Failure / review code'),
+        items: const [DropdownMenuItem(value: '', child: Text('Choose a code')), DropdownMenuItem(value: 'No Signal', child: Text('No signal')), DropdownMenuItem(value: 'Low Optical Power', child: Text('Low optical power')), DropdownMenuItem(value: 'ONT Fault', child: Text('ONT fault')), DropdownMenuItem(value: 'Port/Provisioning Issue', child: Text('Port / provisioning issue')), DropdownMenuItem(value: 'Customer Premises Access', child: Text('Premises access')), DropdownMenuItem(value: 'Other', child: Text('Other'))],
+        onChanged: (value) { if (value != null) setState(() => _failure = value); }),
+      if (_outcome != 'Installed') TextField(controller: _notes, maxLength: 2000, maxLines: 3, decoration: const InputDecoration(labelText: 'Technician note')),
+      const SizedBox(height: 8),
+      const Text('Submitting records the closeout in Frappe and queues a reference-only event. It does not activate the customer in NMS.'),
+    ]))),
+    actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')), FilledButton(onPressed: _submit, child: const Text('Submit'))],
+  );
+}
+
+class _InlineError extends StatelessWidget {
+  const _InlineError(this.message);
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colors.errorContainer,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(message, style: TextStyle(color: colors.onErrorContainer)),
+    );
+  }
+}

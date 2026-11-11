@@ -1,0 +1,57 @@
+services:
+  gateway:
+    environment:
+      IDENTITY_DATABASE_URL_FILE: /run/secrets/identity_database_url
+      IDENTITY_HMAC_KEY_FILE: /run/secrets/identity_hmac_key
+      OMISHA_GOOGLE_SERVER_CLIENT_ID: ${OMISHA_GOOGLE_SERVER_CLIENT_ID:-}
+    secrets:
+      - identity_database_url
+      - identity_hmac_key
+    networks:
+      - identity_internal
+    depends_on:
+      identity-db:
+        condition: service_healthy
+
+  identity-db:
+    image: postgres:18.6
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: omisha_identity
+      POSTGRES_USER: omisha_identity_admin
+      POSTGRES_PASSWORD_FILE: /run/secrets/identity_db_password
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+    secrets:
+      - identity_db_password
+      - identity_runtime_password
+    volumes:
+      - identity_db_data:/var/lib/postgresql
+      - ./identity/bootstrap/010-runtime-role.sh:/docker-entrypoint-initdb.d/010-runtime-role.sh:ro
+    shm_size: 256mb
+    networks:
+      - identity_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U omisha_identity_admin -d omisha_identity"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  identity_db_data:
+
+networks:
+  identity_internal:
+    internal: true
+
+secrets:
+  identity_db_password:
+    file: ./identity/secrets/identity_db_password
+  identity_runtime_password:
+    file: ./identity/secrets/identity_runtime_password
+  identity_database_url:
+    file: ./identity/secrets/identity_database_url
+  identity_hmac_key:
+    file: ./identity/secrets/identity_hmac_key

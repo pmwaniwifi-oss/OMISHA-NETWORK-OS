@@ -1,0 +1,37 @@
+# Opt-in PostgreSQL service for a same-host Rocky/RHEL NMS Prime installation.
+# The NMS application remains installed by its supported RPM path.
+services:
+  nms-postgres:
+    image: postgres:${NMS_POSTGRES_VERSION:-16}-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${NMS_DB_NAME:-nmsprime}
+      POSTGRES_USER: ${NMS_DB_USER:-nmsprime}
+      POSTGRES_PASSWORD_FILE: /run/secrets/nms_db_password
+    secrets:
+      - nms_db_password
+    volumes:
+      - nms-postgres-data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    networks: [nms-database]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    pids_limit: 256
+    mem_limit: ${NMS_POSTGRES_MEMORY_LIMIT:-1g}
+    security_opt: ["no-new-privileges:true"]
+
+networks:
+  nms-database:
+    driver: bridge
+
+volumes:
+  nms-postgres-data:
+
+secrets:
+  nms_db_password:
+    file: ${NMS_DB_PASSWORD_FILE:?Set an absolute private password-file path}

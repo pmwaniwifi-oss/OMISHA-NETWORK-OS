@@ -5,6 +5,9 @@ services:
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
+    pids_limit: 64
+    mem_limit: 128m
+    cpus: 0.5
     environment:
       OMISHA_TENANT: ${OMISHA_TENANT:?Set OMISHA_TENANT}
       OMISHA_INSTALLATION: ${OMISHA_INSTALLATION:?Set OMISHA_INSTALLATION}
@@ -14,7 +17,7 @@ services:
       - "127.0.0.1:9080:9080"
     command: ["serve", "--public-key", "/run/omisha/public.pem", "--license", "/run/omisha/license.json"]
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9080/health', timeout=3)"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9080/readyz', timeout=3)"]
       interval: 30s
       timeout: 5s
       retries: 3

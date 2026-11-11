@@ -1,6 +1,9 @@
 FROM golang:1.27.3-alpine AS builder
 WORKDIR /src
-COPY go.mod main.go ./
+COPY go.mod go.sum ./
+RUN go mod download
+COPY *.go ./
+COPY integrations ./integrations
 RUN CGO_ENABLED=0 go build -trimpath -o /gateway .
 
 FROM alpine:3.24

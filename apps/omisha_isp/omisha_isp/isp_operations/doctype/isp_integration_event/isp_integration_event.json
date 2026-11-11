@@ -1,0 +1,17 @@
+{
+ "doctype":"DocType","name":"ISP Integration Event","module":"ISP Operations","autoname":"hash","track_changes":1,"engine":"InnoDB","field_order":["event_type","source_doctype","source_name","idempotency_key","payload_json","section_delivery","status","attempt_count","next_attempt_at","completed_at","response_summary"],"fields":[
+  {"fieldname":"event_type","label":"Event Type","fieldtype":"Data","reqd":1,"read_only":1,"in_list_view":1},
+  {"fieldname":"source_doctype","label":"Source DocType","fieldtype":"Data","reqd":1,"read_only":1},
+  {"fieldname":"source_name","label":"Source Name","fieldtype":"Dynamic Link","options":"source_doctype","reqd":1,"read_only":1},
+  {"fieldname":"idempotency_key","label":"Idempotency Key","fieldtype":"Data","reqd":1,"unique":1,"read_only":1},
+  {"fieldname":"payload_json","label":"Event Payload","fieldtype":"Code","options":"JSON","reqd":1,"read_only":1},
+  {"fieldname":"section_delivery","label":"Delivery","fieldtype":"Section Break"},
+  {"fieldname":"status","label":"Status","fieldtype":"Select","options":"Pending\nProcessing\nRetry\nSucceeded\nDead Letter","default":"Pending","reqd":1,"in_list_view":1},
+  {"fieldname":"attempt_count","label":"Attempt Count","fieldtype":"Int","default":0,"read_only":1},
+  {"fieldname":"next_attempt_at","label":"Next Attempt At","fieldtype":"Datetime","read_only":1},
+  {"fieldname":"completed_at","label":"Completed At","fieldtype":"Datetime","read_only":1},
+  {"fieldname":"response_summary","label":"Response Summary","fieldtype":"Small Text","read_only":1}
+ ],"permissions":[
+  {"role":"System Manager","read":1,"report":1,"export":1},
+  {"role":"ISP Operations Manager","read":1,"report":1}
+ ]}
