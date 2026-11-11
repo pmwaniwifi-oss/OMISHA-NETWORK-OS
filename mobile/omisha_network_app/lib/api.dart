@@ -137,6 +137,103 @@ class InvitationResult {
   }
 }
 
+
+class AcquisitionProgress {
+  const AcquisitionProgress({
+    required this.id,
+    required this.plan,
+    required this.status,
+    required this.identityStatus,
+    required this.paymentRequest,
+    required this.serviceOrder,
+  });
+
+  final String id;
+  final String plan;
+  final String status;
+  final String identityStatus;
+  final String? paymentRequest;
+  final String? serviceOrder;
+
+  factory AcquisitionProgress.fromJson(Map<String, dynamic> json) {
+    String requiredValue(String key) {
+      final value = json[key];
+      if (value is! String || value.isEmpty || value.length > 160) {
+        throw const ApiException('The acquisition response was invalid.');
+      }
+      return value;
+    }
+
+    String? optionalValue(String key) {
+      final value = json[key];
+      if (value == null || value == '') return null;
+      if (value is! String || value.length > 160) {
+        throw const ApiException('The acquisition response was invalid.');
+      }
+      return value;
+    }
+
+    return AcquisitionProgress(
+      id: requiredValue('name'),
+      plan: requiredValue('requested_plan'),
+      status: requiredValue('acquisition_status'),
+      identityStatus: requiredValue('identity_status'),
+      paymentRequest: optionalValue('payment_request'),
+      serviceOrder: optionalValue('service_order'),
+    );
+  }
+}
+
+class ServiceOrderProjection {
+  const ServiceOrderProjection({
+    required this.id,
+    required this.plan,
+    required this.status,
+    required this.externalServiceId,
+  });
+
+  final String id;
+  final String plan;
+  final String status;
+  final String? externalServiceId;
+
+  factory ServiceOrderProjection.fromJson(Map<String, dynamic> json) {
+    final id = json['name'];
+    final plan = json['requested_plan'];
+    final status = json['service_status'];
+    final external = json['external_service_id'];
+    if (id is! String || id.isEmpty || id.length > 160 ||
+        plan is! String || plan.isEmpty || plan.length > 160 ||
+        status is! String || status.isEmpty || status.length > 80 ||
+        (external != null && (external is! String || external.length > 160))) {
+      throw const ApiException('The service order response was invalid.');
+    }
+    return ServiceOrderProjection(
+      id: id,
+      plan: plan,
+      status: status,
+      externalServiceId: external as String?,
+    );
+  }
+}
+
+class NMSContractReference {
+  const NMSContractReference({required this.number, required this.nmsId});
+
+  final String number;
+  final int nmsId;
+
+  factory NMSContractReference.fromJson(Map<String, dynamic> json) {
+    final number = json['number'];
+    final id = json['nms_id'];
+    if (number is! String || number.isEmpty || number.length > 64 ||
+        id is! int || id <= 0) {
+      throw const ApiException('The network reference response was invalid.');
+    }
+    return NMSContractReference(number: number, nmsId: id);
+  }
+}
+
 String newIdempotencyKey() {
   final random = Random.secure();
   final bytes = List<int>.generate(16, (_) => random.nextInt(256));
@@ -350,6 +447,64 @@ class OmishaApi {
         Map<String, dynamic>.from(response['active_context'] as Map),
       ),
     );
+  }
+
+
+  Future<AcquisitionProgress> getAcquisitionProgress({
+    required String accessToken,
+    required String acquisitionId,
+  }) async {
+    if (acquisitionId.isEmpty || acquisitionId.length > 140) {
+      throw const ApiException('The acquisition reference was invalid.');
+    }
+    final response = await _send(
+      'GET',
+      'v1/me/isp/acquisitions/${Uri.encodeComponent(acquisitionId)}',
+      token: accessToken,
+    );
+    final value = response['acquisition'];
+    if (value is! Map) {
+      throw const ApiException('The acquisition response was invalid.');
+    }
+    return AcquisitionProgress.fromJson(Map<String, dynamic>.from(value));
+  }
+
+  Future<ServiceOrderProjection> getServiceOrder({
+    required String accessToken,
+    required String serviceOrderId,
+  }) async {
+    if (serviceOrderId.isEmpty || serviceOrderId.length > 140) {
+      throw const ApiException('The service order reference was invalid.');
+    }
+    final response = await _send(
+      'GET',
+      'v1/me/isp/service-orders/${Uri.encodeComponent(serviceOrderId)}',
+      token: accessToken,
+    );
+    final value = response['service_order'];
+    if (value is! Map) {
+      throw const ApiException('The service order response was invalid.');
+    }
+    return ServiceOrderProjection.fromJson(Map<String, dynamic>.from(value));
+  }
+
+  Future<NMSContractReference> getNMSContractReference({
+    required String accessToken,
+    required String number,
+  }) async {
+    if (number.isEmpty || number.length > 64) {
+      throw const ApiException('The network contract reference was invalid.');
+    }
+    final response = await _send(
+      'GET',
+      'v1/me/isp/nms/contracts/${Uri.encodeComponent(number)}',
+      token: accessToken,
+    );
+    final value = response['contract_reference'];
+    if (value is! Map) {
+      throw const ApiException('The network reference response was invalid.');
+    }
+    return NMSContractReference.fromJson(Map<String, dynamic>.from(value));
   }
 
   Future<void> logout(String identityToken) async {
