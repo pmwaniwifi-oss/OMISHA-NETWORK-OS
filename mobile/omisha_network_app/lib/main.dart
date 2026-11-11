@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 import 'api.dart';
 
 const _apiBaseUrl = String.fromEnvironment('OMISHA_API_BASE_URL');
+const _googleServerClientId = String.fromEnvironment('OMISHA_GOOGLE_SERVER_CLIENT_ID');
 const _sessionKey = 'omisha.scoped_access_token';
 const _identitySessionKey = 'omisha.identity_session_token';
 
@@ -29,6 +31,7 @@ class _OmishaAppState extends State<OmishaApp> {
   List<WorkspaceContext> _contexts = const [];
   ApiSession? _session;
   bool _busy = true;
+  bool _googleInitialized = false;
 
   @override
   void initState() {
@@ -119,6 +122,53 @@ class _OmishaAppState extends State<OmishaApp> {
         challengeId: challenge,
         code: code,
       );
+      await _finishIdentityAuthentication(identityToken);
+    } catch (exception) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = _safeMessage(exception);
+      });
+    }
+  }
+
+  Future<void> _signInWithGoogle() async {
+    if (_api == null) return;
+    if (_googleServerClientId.isEmpty) {
+      setState(() {
+        _error = 'Google sign-in is not configured for this build yet.';
+      });
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      if (!_googleInitialized) {
+        await GoogleSignIn.instance.initialize(
+          serverClientId: _googleServerClientId,
+        );
+        _googleInitialized = true;
+      }
+      final account = await GoogleSignIn.instance.authenticate();
+      final googleIdToken = account.authentication.idToken;
+      if (googleIdToken == null) {
+        throw const ApiException('Google did not return a sign-in token.');
+      }
+      final identityToken = await _api!.exchangeGoogleIdToken(googleIdToken);
+      await _finishIdentityAuthentication(identityToken);
+    } catch (exception) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = _safeMessage(exception);
+      });
+    }
+  }
+
+  Future<void> _finishIdentityAuthentication(String identityToken) async {
+    try {
       final contexts = await _api!.listContexts(identityToken);
       if (contexts.isEmpty) {
         throw const ApiException('No active account access is assigned to this sign-in.');
@@ -296,10 +346,12 @@ class _OmishaAppState extends State<OmishaApp> {
     }
     return _SignInPage(
       challengeRequested: _challengeId != null,
+      googleEnabled: _googleServerClientId.isNotEmpty,
       busy: _busy,
       error: _error,
       onStartChallenge: _startChallenge,
       onVerifyCode: _verifyCode,
+      onGoogleSignIn: _signInWithGoogle,
       onStartOver: () {
         setState(() {
           _challengeId = null;
@@ -331,18 +383,22 @@ class _LoadingPage extends StatelessWidget {
 class _SignInPage extends StatefulWidget {
   const _SignInPage({
     required this.challengeRequested,
+    required this.googleEnabled,
     required this.busy,
     required this.error,
     required this.onStartChallenge,
     required this.onVerifyCode,
+    required this.onGoogleSignIn,
     required this.onStartOver,
   });
 
   final bool challengeRequested;
+  final bool googleEnabled;
   final bool busy;
   final String? error;
   final Future<String> Function(String identifier) onStartChallenge;
   final Future<void> Function(String code) onVerifyCode;
+  final Future<void> Function() onGoogleSignIn;
   final VoidCallback onStartOver;
 
   @override
@@ -412,6 +468,19 @@ class _SignInPageState extends State<_SignInPage> {
                           const SizedBox(height: 16),
                           SizedBox(
                             width: double.infinity,
+                            child: OutlinedButton.icon(
+                              onPressed: widget.busy || !widget.googleEnabled
+                                  ? null
+                                  : widget.onGoogleSignIn,
+                              icon: const Icon(Icons.account_circle_outlined),
+                              label: Text(widget.googleEnabled
+                                  ? 'Continue with Google'
+                                  : 'Google sign-in setup required'),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          SizedBox(
+                            width: double.infinity,
                             child: FilledButton(
                               onPressed: widget.busy
                                   ? null
@@ -422,7 +491,7 @@ class _SignInPageState extends State<_SignInPage> {
                                         } catch (_) {}
                                       }
                                     },
-                              child: const Text('Continue securely'),
+                              child: const Text('Continue with verification code'),
                             ),
                           ),
                         ] else ...[
