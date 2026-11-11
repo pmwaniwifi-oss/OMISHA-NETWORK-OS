@@ -45,7 +45,7 @@ PaymentConfirmed is not a client-supplied field and does not itself activate ser
 
 Do not treat an end-customer's broadband credentials as credentials for the ISP router's administrative interface. In a common PPPoE design, the customer configures WAN PPPoE credentials in their ONT/router; the access concentrator/BNG forwards authentication to a RADIUS/AAA service, which checks the subscriber profile and returns allowed policy. IPoE/DHCP with a defined AAA mechanism is another possible design. The exact access method, BNG/OLT/ONT vendors and profile attributes must be confirmed. If by “login to ISP router” the user means accessing a managed router's admin console, that is a separate privileged operation and must not use subscriber credentials.
 
-NMS Prime may be the service provisioning/orchestration interface only if the installed product/version supports the needed API and repeat-safe operations. It must not be assumed to be the broadband authentication server: the exact product is not yet identified. The architecture therefore names a separate AAA/RADIUS/BNG contract, with NMS Prime integrating to it where supported. Until the NMS and access-control interfaces are verified, keep provisioning pending/manual review.
+NMS Prime may orchestrate service/device provisioning only if the installed product/version supports the needed API and repeat-safe operations. TR-069/ACS or TR-369/USP manages a compatible ONT/router; BNG/NAS plus RADIUS/AAA (or the selected IPoE equivalent) authorizes subscriber traffic. These are separate control functions even if one vendor platform integrates them. The exact NMS Prime product is not yet identified, so the architecture keeps separate contracts and does not claim that NMS Prime itself authenticates the ONT. Until the NMS, OLT, CPE, ACS/USP, and access/AAA interfaces are verified, keep provisioning pending/manual review.
 
 Identity method is independently policy-gated. Aadhaar offline/e-KYC remains disabled unless the operator has confirmed eligibility, a compliant provider/process, and approved configuration. Store only a minimal verification result/reference; never upload/store the source Aadhaar artifact, QR/XML, biometrics, or OTP in this app.
 
@@ -76,7 +76,7 @@ All API payloads are bounded and schema-versioned. Apply per-identity and per-te
 8. Publish its reference-only outbox event. NMS adapter processes only against the verified product API and idempotency contract.
 9. NMS/operations adapter provisions the subscriber profile to the verified access/AAA path. Require idempotency, status read-back and an explicit success response; never activate based only on “request sent”.
 10. Mark Active/Ready after the fiber job is closed, optical/link checks pass, and the access profile is enabled/read back. Give the customer the approved WAN subscriber configuration through a secure channel; do not expose router administration credentials.
-11. Customer enters/configures subscriber credentials on the CPE/ONT router WAN (PPPoE where selected) or uses the approved IPoE flow. BNG/NAS → RADIUS/AAA → subscriber profile performs authentication/authorization; accounting/session state is correlated back to the service. Billing commencement follows the approved activation rule; the first successful session is independently auditable.
+11. No customer credential entry is required. The installed ONT/router securely checks in to the approved device-management controller (ACS via TR-069/CWMP or USP Controller via TR-369, if supported by that device); the service workflow matches the device to the installation/service order and pushes the approved configuration. The router brings up its subscriber WAN automatically (PPPoE or IPoE as selected); BNG/NAS and RADIUS/AAA enforce subscriber authorization. Accounting/session state is correlated to the service. Billing commencement follows the approved activation rule; first successful session is independently auditable.
 
 If payment succeeds but downstream onboarding fails, the request goes to a visible exception/refund-review state. Never silently create another payment request or charge. Refunds/reversals are recorded through ERPNext and the selected payment provider's confirmed process.
 
@@ -110,13 +110,14 @@ Before calling self-care operational:
 - Serviceability data source and who can approve exceptions.
 - Applicable operator identity requirements and eligible compliant verification method.
 - Exact NMS Prime product/vendor/version and whether it provisions access profiles or only manages devices; its supported API and idempotency/read-back behavior.
-- Access topology: OLT/ONT, BNG/BRAS/NAS, PPPoE vs IPoE, RADIUS/AAA ownership, subscriber credential delivery/reset process, accounting/session updates, and whether customer CPE is OMISHA/ISP-managed.
+- Access topology: OLT/ONT, BNG/BRAS/NAS, PPPoE vs IPoE, RADIUS/AAA ownership, accounting/session updates, and whether customer CPE is OMISHA/ISP-managed.
+- What “TR2” means in the operator's equipment: TR-069/CWMP, TR-369/USP, a vendor-specific protocol, or another system. Confirm ONT/router model, supported agent, ACS/controller endpoint, secure bootstrap credentials/certificates, data model and factory-reset/replacement procedure.
 - Customer privacy/consent text, retention schedule, support policy and lawful reporting/accounting treatment.
 
 
 ## Fiber installation and broadband authentication
 
-The customer journey is: payment reconciled → technician installs fiber and records the ONT/optical/link test → service order is submitted to the NMS/access adapter → the adapter enables the subscriber profile in the access/AAA path and reads back success → service shows Active/Ready → customer configures/authenticates the WAN subscriber session → session/accounting status is correlated to the service.
+The customer journey is: payment reconciled → technician installs fiber and records ONT/optical/link test → service order is submitted to the NMS/access and device-management adapters → the ONT/router securely auto-registers with the approved ACS/USP controller → controller applies the correct service profile → BNG/NAS and RADIUS/AAA authorize the router's subscriber session → successful read-back/session check sets the service Active/Ready. The customer does not enter PPPoE credentials or log in to router administration.
 
 NMS Prime is an unverified integration label in this repository. It could be a network management product, an NMS custom system, or another product. Do not hard-code it as the subscriber authentication authority until operator confirms its exact identity and API. In a broadband design using PPPoE, authentication is usually performed by the BNG/NAS and an AAA/RADIUS service; NMS may provision that profile through a supported API. Cisco's documentation describes BNG subscriber management as handling identification, address assignment, authentication, authorization and accounting, while FreeRADIUS documentation describes the RADIUS server processing a login initiated by a remote user's PPP/802.1X link. These are reference architecture examples, not confirmation of this ISP's deployed equipment.
 
@@ -124,7 +125,8 @@ Required private integration contract (to be completed after vendor/version disc
 
 - Provision request: service UUID, access-circuit/ONT reference, plan/profile ID, subscriber credential reference (never plaintext in logs), idempotency key and correlation ID.
 - Result/read-back: accepted/rejected, authoritative external profile/session ID, applied policy/profile version, timestamp and sanitized failure code.
-- Subscriber authentication: chosen PPPoE/IPoE flow, secret generation/storage and secure delivery/reset, lockout/rate-limit policy, and support-assisted reset.
+- Device onboarding: TR-069/CWMP or TR-369/USP agent/controller support, mutual authentication/credential bootstrap, service-order-to-device matching, config profile read-back, and secure replacement/reset process. Customer should not receive device-management or router-admin secrets.
+- Subscriber authentication: chosen PPPoE/IPoE flow with credentials provisioned to the router automatically, or an approved device-bound IPoE model; BNG/RADIUS policy, accounting/session updates, and lockout/rate-limit policy.
 - Accounting/session: start/stop/interim updates, NAS/BNG identity, session ID, assigned address and byte counters as permitted; reconcile duplicates and late events without copying high-volume raw logs into every business system.
 - Operations safety: rollback/disable procedure, manual recovery queue, credential rotation and outage behavior. NMS/AAA failure must not create a false Active state.
 
@@ -132,3 +134,21 @@ References:
 - Cisco BNG subscriber management overview: https://www.cisco.com/c/en/us/td/docs/net_mgmt/prime/network/5-1/user/guide/CiscoPrimeNetwork51UserGuide/bng.html
 - Cisco Prime Infrastructure device access and external RADIUS/TACACS+ user authentication: https://www.cisco.com/c/en/us/td/docs/net_mgmt/prime/infrastructure/3-10/admin/cisco_prime_infrastructure_3_10_admin_guide/user_permissions_and_device_access.html
 - FreeRADIUS session concepts (PPP/802.1X link, NAS request, RADIUS verification): https://www.freeradius.org/documentation/freeradius-server/3.2.9/concepts/session/radius_session.html
+
+
+## Automatic ONT/router registration (customer does nothing)
+
+“TR2” has not been identified precisely. This design records the intended behavior as automatic ONT/router onboarding and supports a standards-based adapter for TR-069/CWMP or TR-369/USP after the exact device and controller are confirmed. If “TR2” means a vendor-specific product/protocol, the operator must provide its product/model and interface contract before implementation.
+
+- Technician scans/records ONT/router model and device identifiers against the installation job; server checks they are expected for that service and network location.
+- ONT authentication/registration to the access network and router management check-in are separate proofs. The access network uses the operator's OLT/ONT registration method; the management plane uses the device's supported ACS/USP trust/bootstrap method.
+- The provisioning controller maps the authenticated device to one service order, applies the approved WAN/service profile and reports configuration read-back. It must not use customer-entered credentials or infer tenant from a device-supplied account field.
+- The CPE then starts its WAN subscriber session automatically. BNG/NAS and the selected AAA/RADIUS system authorize the service; session/accounting events return to OMISHA operations for service status and billing correlation.
+- A failed, unknown, duplicated, replaced, or factory-reset device remains Pending/Manual Review. Never auto-attach an unknown device to a customer using serial number alone.
+- Device management credentials/certificates and subscriber credentials are different secrets. Keep them encrypted and scoped, redact them from logs, rotate/revoke on replacement or compromise, and never expose ACS/USP credentials to customers.
+- Release acceptance requires the exact ONT/router models and access topology in a lab or controlled pilot, including first boot, duplicate serial, wrong service, interrupted check-in, reset/replacement, configuration mismatch, AAA rejection, and retry/recovery.
+
+Broadband Forum references:
+- TR-069/CWMP defines CPE-to-ACS secure auto-configuration and dynamic service provisioning: https://www.broadband-forum.org/pdfs/tr-069-1-6-0.pdf
+- TR-369/USP defines Agent and Controller management roles: https://www.broadband-forum.org/pdfs/tr-369-1-3-1.pdf
+- Broadband Forum TR-369 technical library identifies the current in-force revision; use the deployed device's supported revision during implementation: https://www.broadband-forum.org/technical-library?number=TR-369
