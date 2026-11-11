@@ -517,7 +517,7 @@ A person may have more than one legitimate membership (for example, a subscriber
 
 The single app uses role-aware navigation and feature modules over the same versioned API. Keep tokens in Android Keystore-backed secure storage; revoke sessions on logout, account disable, device loss, or membership removal. Clear tenant-specific local caches when switching context or signing out. Never store Aadhaar source artifacts, payment secrets, or broad subscriber lists on the device. Technician offline mode is limited to encrypted, expiring, non-sensitive assigned-work drafts; payment and identity verification require an approved online or separately certified flow.
 
-The customer web portal and any future staff web portal use the same server authorization model and domain API. Android and web are clients, not separate customer databases. The dedicated Flutter API/BFF remains a planned Go gateway capability; it is not implemented in the current repository.
+The customer web portal and any future staff web portal use the same server authorization model and domain API. Android and web are clients, not separate customer databases. The Go gateway contains the Google identity/session foundation; customer-facing BFF business endpoints and enrollment APIs remain planned and are not implemented.
 
 ### Delivery gates
 
