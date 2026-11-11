@@ -232,8 +232,8 @@ func (api *googleIdentityAPI) exchangeGoogleIDToken(w http.ResponseWriter, r *ht
 	}
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO sessions
-		 (session_id, identity_id, token_hmac, session_kind, issued_at, expires_at)
-		 VALUES ($1, $2, $3, 'identity', now(), $4)`,
+		 (session_id, identity_id, token_hmac, session_kind, session_family_id, issued_at, expires_at)
+		 VALUES ($1, $2, $3, 'identity', $1, now(), $4)`,
 		sessionID, identityID, keyedDigest(api.hmacKey, "session-token", sessionToken), expiresAt)
 	if err == nil {
 		err = insertSecurityAudit(ctx, tx, identityID, "auth.google.login", "success")
