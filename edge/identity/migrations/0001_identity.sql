@@ -3,7 +3,7 @@
 -- Application supplies UUIDs and HMAC-SHA-256 pseudonyms using a server-held key.
 BEGIN;
 
-CREATE TABLE omisha_schema_migrations (
+CREATE TABLE IF NOT EXISTS omisha_schema_migrations (
     version TEXT PRIMARY KEY,
     applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
