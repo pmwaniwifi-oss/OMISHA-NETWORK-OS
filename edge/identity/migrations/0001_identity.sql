@@ -69,14 +69,19 @@ CREATE TABLE sessions (
 CREATE INDEX sessions_identity_live_idx
     ON sessions(identity_id, expires_at) WHERE revoked_at IS NULL;
 
-CREATE TABLE provider_token_replays (
-    provider TEXT NOT NULL,
-    token_fingerprint BYTEA NOT NULL CHECK (octet_length(token_fingerprint) = 32),
+CREATE TABLE auth_challenge_nonces (
+    challenge_id UUID PRIMARY KEY,
+    provider TEXT NOT NULL CHECK (provider IN ('google')),
+    nonce_hmac BYTEA NOT NULL CHECK (octet_length(nonce_hmac) = 32),
+    issued_at TIMESTAMPTZ NOT NULL,
     expires_at TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (provider, token_fingerprint)
+    consumed_at TIMESTAMPTZ,
+    UNIQUE (provider, nonce_hmac),
+    CHECK (expires_at > issued_at)
 );
 
-CREATE INDEX provider_token_replays_expiry_idx ON provider_token_replays(expires_at);
+CREATE INDEX auth_challenge_nonces_live_idx
+    ON auth_challenge_nonces(provider, expires_at) WHERE consumed_at IS NULL;
 
 CREATE TABLE security_audit_events (
     audit_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
