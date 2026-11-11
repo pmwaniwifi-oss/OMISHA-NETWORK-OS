@@ -160,6 +160,7 @@ class _OmishaAppState extends State<OmishaApp> {
       final identityToken = await api.exchangeGoogleIdToken(
         googleIdToken: googleIdToken,
         challengeId: challenge.id,
+        nonce: challenge.nonce,
       );
       await _finishIdentityAuthentication(identityToken);
     } catch (exception) {
