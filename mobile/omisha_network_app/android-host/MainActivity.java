@@ -1,5 +1,6 @@
 package com.omisha.omisha_network_app;
 
+import android.content.Intent;
 import android.os.CancellationSignal;
 
 import androidx.annotation.NonNull;
@@ -44,6 +45,19 @@ public final class MainActivity extends FlutterActivity {
                 return;
             }
             requestGoogleCredential(clientId, nonce, result);
+            return;
+        }
+        if ("shareInvitation".equals(call.method)) {
+            String text = call.argument("text");
+            if (text == null || text.isBlank() || text.length() > 2000) {
+                result.error("invalid_request", "Invitation text is invalid.", null);
+                return;
+            }
+            Intent send = new Intent(Intent.ACTION_SEND);
+            send.setType("text/plain");
+            send.putExtra(Intent.EXTRA_TEXT, text);
+            startActivity(Intent.createChooser(send, "Share OMISHA invitation"));
+            result.success(null);
             return;
         }
         if ("clearCredentialState".equals(call.method)) {
