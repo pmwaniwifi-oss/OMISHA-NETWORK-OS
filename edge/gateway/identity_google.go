@@ -106,8 +106,8 @@ func (api *googleIdentityAPI) issueGoogleChallenge(w http.ResponseWriter, r *htt
 	defer cancel()
 	_, err = api.db.ExecContext(ctx,
 		`INSERT INTO auth_challenge_nonces (challenge_id, provider, nonce_hmac, issued_at, expires_at)
-		 VALUES ($1, 'google', $2, now(), now() + $3::interval)`,
-		challengeID, keyedDigest(api.hmacKey, "google-challenge-nonce", nonce), googleChallengeLifetime.String())
+		 VALUES ($1, 'google', $2, now(), now() + ($3 * interval '1 second'))`,
+		challengeID, keyedDigest(api.hmacKey, "google-challenge-nonce", nonce), int64(googleChallengeLifetime.Seconds()))
 	if err != nil {
 		log.Printf("Google challenge persistence failed")
 		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "sign-in is unavailable"})
