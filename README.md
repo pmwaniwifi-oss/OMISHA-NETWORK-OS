@@ -13,7 +13,7 @@ Project planning and installer draft for an integrated ISP platform.
 
 - `docs/cloud-deployment-and-licensing.md`: proposed OMISHA-hosted, per-client cloud and per-user licensing design.
 - `licensing/` and `docker-compose.yml`: development foundation for signed offline license verification and an online activation client. This does not yet enforce Frappe user seats or implement an online license authority. Compose runs only the licensing component, not the full platform.
-- `edge/`: local VM prototype with a Go gateway, Rust worker, Valkey cache and read-only NMS/ERP adapter libraries. Google identity/session/invitation source exists on the draft branch but is not validated or production-ready. Customer business routes, Frappe/NMS connections and actual background jobs remain unimplemented; it must not be exposed to the internet.
+- `edge/`: local VM prototype with a Go gateway, Rust worker, Valkey cache and read-only NMS/ERP adapter libraries, including bounded Frappe onboarding/service-order projections and minimal NMS contract/CPE lookup references. Google identity/session/invitation source exists on the draft branch but is not validated or production-ready. Customer business routes, Frappe/NMS connections and actual background jobs remain unimplemented; it must not be exposed to the internet.
 - `docs/verification-status.md`: current checks and unresolved gaps.
 
 - `docs/frappe/`: ERPNext/Frappe integration architecture and performance proposal. This is the recommended business-platform direction.
