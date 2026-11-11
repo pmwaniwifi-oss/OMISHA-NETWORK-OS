@@ -515,3 +515,37 @@ The customer web portal and any future staff web portal use the same server auth
 6. Verify with cross-tenant access tests, role-escalation tests, revoked-session tests, device-cache clearing tests and offline-draft expiry tests before pilot.
 
 **Implementation status:** the repository now has an initial Flutter package shell with a login/context-selection UI and separate secure identity/context tokens. It is not a build-ready Android project: Flutter/Dart were unavailable in the inspected workspace, generated Android platform files are absent, and the Go authentication/membership endpoints are not implemented. The shell is not a usable login or production app yet.
+
+
+## 15. Social sign-in and OMISHA entertainment monetization
+
+### Social identity is sign-in only
+
+Google Sign-In is the first social identity provider planned for the single Android app. A valid Google identity token proves a Google account sign-in; it does not create an ISP, technician, sales, finance, or OMISHA-admin role. The backend maps the provider's stable subject to an account, then loads only existing server-authorized memberships. New ISP/OMISHA staff require an invitation and approved membership. Customer registration remains subject to phone/contact and applicable subscriber verification.
+
+The Flutter app sends a Google ID token to the Go API over HTTPS. The API validates signature using Google's rotating public keys, issuer, audience/client ID and expiry; it uses the provider subject as the stable external identity. Do not trust email/name from an unverified client body, auto-link existing accounts by an unverified email, or store a Google access token if the app only needs sign-in. Ask only for basic sign-in identity; no Gmail, Drive, YouTube or social-post scopes.
+
+Google OAuth client IDs and Android package/signing fingerprints must be created in OMISHA's Google Cloud identity project. A client ID is public configuration, not an app secret; client secrets and provider credentials never go in Flutter code or public Git. Google brand verification/consent-screen review and production app registration remain release requirements. Other providers (e.g. Meta) can be added behind the same identity-provider adapter after their own app registration/review and credentials are provided.
+
+### Customer games and short-video feed
+
+The customer workspace may include an Entertainment area with original games and a short-video feed. Content must be created by OMISHA or explicitly licensed for in-app playback and monetization. Do not scrape or download Instagram/YouTube/social-media reels or imply that a social login grants rights to re-host them. Each item needs rights owner, permitted territories, start/end dates, age rating, attribution, moderation state and takedown workflow. Store video once in an OMISHA-controlled object/CDN tier and keep one metadata record; do not copy the same media into each ISP tenant database.
+
+Customer play/watch activity is analytics data, not ISP service data. Keep it in the entertainment/analytics boundary with configurable retention and consent controls. Never let ad tracking or game points affect connectivity, PM-WANI access, bill payment, support priority, or statutory records.
+
+### Revenue path to OMISHA
+
+The recommended first revenue model is an OMISHA-owned publisher account with Google AdMob (plus direct sponsorship placements after contract review). Rewarded ads are opt-in and limited to non-essential game rewards; normal ISP tasks and service access never require viewing an ad. Use test ad unit IDs during development. The OMISHA company controls the publisher/payee profile, payout bank/tax information, ad units and reporting; ad revenue is not guaranteed and depends on traffic, fill, policy eligibility and market rates.
+
+The client callback is not authoritative for awarding valuable rewards. For rewards that affect an in-app game economy, configure AdMob server-side verification, validate Google's callback signature and ad-unit/placement data, enforce a unique idempotency key, then write the reward once to a dedicated entertainment ledger. No cash redemption, transferability, contest/prize, gambling or telecom-bill credit is in the initial scope; each would need separate legal, tax, store-policy and fraud review. Never share subscriber PII or Aadhaar data with advertising networks.
+
+### Implementation gates
+
+1. OMISHA owner creates the Google Cloud OAuth app and verifies branding; package ID and signing fingerprints are fixed in the Android release pipeline.
+2. Implement Go-side Google token verification, provider-subject identity mapping, account-linking/recovery, invitation checks, rate limits and audit logs. Add OTP/passkey or company IdP flows as required by account type.
+3. Provide the Google social button in the one app. Keep it available to customer, ISP-staff and OMISHA identities, while the server controls membership and may require additional staff MFA.
+4. Define entertainment content rights, moderation, age/consent policy, storage/CDN, retention, and OMISHA AdMob publisher/payee account.
+5. Add AdMob using test IDs only, then test ad callbacks and server-side verification. Move to production ad units only after store/privacy policy and publisher account review.
+6. Measure ad fill, valid impressions, completion, reward fraud, user retention and revenue net of hosting/content costs before scaling.
+
+**Implementation status:** the Flutter shell now has a Google sign-in option and an API exchange contract, but the Go identity endpoint, Google OAuth project/client IDs, authentication verification, AdMob SDK, video/game catalog and monetization ledger are not implemented. Social login and entertainment monetization are not live.
