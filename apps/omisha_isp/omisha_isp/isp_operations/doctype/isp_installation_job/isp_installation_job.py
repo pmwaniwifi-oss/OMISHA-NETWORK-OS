@@ -37,7 +37,11 @@ class ISPInstallationJob(Document):
             frappe.throw(_("Assigned technician must be an enabled user."))
         if "ISP Technician" not in frappe.get_roles(tech):
             frappe.throw(_("Assigned user must have the ISP Technician role."))
-        if frappe.session.user != "Administrator" and frappe.session.user != tech:
+        gateway_actor = getattr(self, "_omisha_closeout_actor", None)
+        if gateway_actor:
+            if gateway_actor != tech:
+                frappe.throw(_("Gateway closeout actor must be the assigned technician."))
+        elif frappe.session.user != "Administrator" and frappe.session.user != tech:
             if "ISP Operations Manager" not in frappe.get_roles(frappe.session.user) and "System Manager" not in frappe.get_roles(frappe.session.user):
                 frappe.throw(_("Only the assigned technician or an ISP operations manager can update this installation."))
 

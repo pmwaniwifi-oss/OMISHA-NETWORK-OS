@@ -3,6 +3,7 @@
 package integrations
 
 import (
+	"bytes"
     "context"
     "encoding/base64"
     "encoding/json"
@@ -88,6 +89,48 @@ func (c *Client) read(ctx context.Context, tenant, path string) (json.RawMessage
     return body, nil
 }
 
+func (c *Client) postFrappeCloseout(ctx context.Context, tenant, jobName, technician string, closeout any) (json.RawMessage, error) {
+	if c.kind != "frappe" || tenant != c.tenant || !document.MatchString(jobName) || !frappeUser.MatchString(technician) {
+		return nil, ErrTenant
+	}
+	body, err := json.Marshal(map[string]any{
+		"job_name": jobName,
+		"expected_technician": technician,
+		"closeout": closeout,
+	})
+	if err != nil {
+		return nil, ErrUpstream
+	}
+	const method = "/api/method/omisha_isp.api.installation.submit_closeout"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.origin+method, bytes.NewReader(body))
+	if err != nil {
+		return nil, ErrUpstream
+	}
+	req.Header.Set("Authorization", c.authorization)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	response, err := c.http.Do(req)
+	if err != nil {
+		return nil, ErrUpstream
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%w: HTTP %d", ErrUpstream, response.StatusCode)
+	}
+	const maximum = 256 << 10
+	data, err := io.ReadAll(io.LimitReader(response.Body, maximum+1))
+	if err != nil || len(data) > maximum || !json.Valid(data) {
+		return nil, ErrUpstream
+	}
+	var envelope struct {
+		Message json.RawMessage `json:"message"`
+	}
+	if json.Unmarshal(data, &envelope) != nil || len(envelope.Message) == 0 || string(envelope.Message) == "null" {
+		return nil, ErrUpstream
+	}
+	return envelope.Message, nil
+}
+
 // Customer fetches one known ERPNext Customer. Name-to-subscriber ownership must
 // be resolved by the authenticated BFF; this function is not a customer portal.
 func (c *Client) Customer(ctx context.Context, tenant, name string) (json.RawMessage, error) {
@@ -166,6 +209,50 @@ type InstallationJobProjection struct {
 	WANLinkUp int `json:"wan_link_up"`
 	FailureCode string `json:"failure_code"`
 	Docstatus int `json:"docstatus"`
+}
+
+type InstallationCloseoutInput struct {
+	Outcome string `json:"installation_outcome"`
+	ONTVendor string `json:"ont_vendor"`
+	ONTModel string `json:"ont_model"`
+	ONTSerial string `json:"ont_serial"`
+	ONTMAC string `json:"ont_mac"`
+	OLTReference string `json:"olt_reference"`
+	FiberConnected bool `json:"fiber_connected"`
+	ONTPowered bool `json:"ont_powered"`
+	OpticalTestPassed bool `json:"optical_test_passed"`
+	OpticalRXDBM *float64 `json:"optical_rx_dbm"`
+	WANLinkUp bool `json:"wan_link_up"`
+	FailureCode string `json:"failure_code"`
+	TechnicianNotes string `json:"technician_notes"`
+}
+
+type InstallationCloseoutResult struct {
+	State string `json:"state"`
+	InstallationJob string `json:"installation_job"`
+	Outcome string `json:"installation_outcome"`
+}
+
+func (c *Client) SubmitInstallationCloseout(ctx context.Context, tenant, jobName, technician string, closeout InstallationCloseoutInput) (InstallationCloseoutResult, error) {
+	var result InstallationCloseoutResult
+	raw, err := c.postFrappeCloseout(ctx, tenant, jobName, technician, closeout)
+	if err != nil {
+		return result, err
+	}
+	if json.Unmarshal(raw, &result) != nil || result.InstallationJob != jobName {
+		return InstallationCloseoutResult{}, ErrUpstream
+	}
+	switch result.State {
+	case "submitted", "already_submitted":
+		if result.Outcome != "Installed" && result.Outcome != "Failed" && result.Outcome != "Needs Review" {
+			return InstallationCloseoutResult{}, ErrUpstream
+		}
+	case "conflict":
+		return InstallationCloseoutResult{}, ErrAmbiguous
+	default:
+		return InstallationCloseoutResult{}, ErrUpstream
+	}
+	return result, nil
 }
 
 // AssignedInstallationJob resolves one job only when the mapped Frappe user

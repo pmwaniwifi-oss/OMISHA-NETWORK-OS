@@ -26,6 +26,8 @@
   "section_closeout",
   "failure_code",
   "technician_notes",
+  "closeout_submitted_by",
+  "closeout_request_digest",
   "completed_at"
  ],
  "fields": [
@@ -145,6 +147,22 @@
    "fieldname": "technician_notes",
    "label": "Technician Notes",
    "fieldtype": "Small Text"
+  },
+  {
+   "fieldname": "closeout_submitted_by",
+   "label": "Closeout Submitted By",
+   "fieldtype": "Link",
+   "options": "User",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "closeout_request_digest",
+   "label": "Closeout Request Digest",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "no_copy": 1,
+   "hidden": 1
   },
   {
    "fieldname": "completed_at",

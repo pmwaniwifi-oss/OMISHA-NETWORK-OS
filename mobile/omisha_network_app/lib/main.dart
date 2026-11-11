@@ -1251,6 +1251,27 @@ class _InstallationJobsPageState extends State<_InstallationJobsPage> {
     }
   }
 
+  Future<void> _closeout(InstallationJob job) async {
+    final closeout = await showDialog<InstallationCloseout>(
+      context: context,
+      builder: (_) => _InstallationCloseoutDialog(job: job),
+    );
+    if (closeout == null || !mounted) return;
+    setState(() { _nmsErrors.remove(job.id); _busy = true; });
+    try {
+      await widget.api.submitInstallationCloseout(
+        accessToken: widget.accessToken, jobId: job.id, closeout: closeout,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Installation closeout submitted to ISP operations.')));
+      await _load();
+    } catch (error) {
+      if (mounted) setState(() => _error = error is ApiException ? error.message : 'Closeout could not be submitted.');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('My fiber installation jobs'), actions: [
@@ -1273,6 +1294,12 @@ class _InstallationJobsPageState extends State<_InstallationJobsPage> {
             const SizedBox(height: 8),
             Text('Checks: fiber ${job.fiberConnected ? '✓' : '—'} · power ${job.ontPowered ? '✓' : '—'} · optical ${job.opticalTestPassed ? '✓' : '—'} · WAN ${job.wanLinkUp ? '✓' : '—'}'),
             if (job.opticalRxDbm != null) Text('Optical RX: ${job.opticalRxDbm} dBm'),
+            const SizedBox(height: 8),
+            FilledButton.icon(
+              onPressed: _busy ? null : () => _closeout(job),
+              icon: const Icon(Icons.assignment_turned_in_outlined),
+              label: const Text('Submit installation closeout'),
+            ),
             const SizedBox(height: 10),
             OutlinedButton.icon(
               onPressed: _nmsBusy.contains(job.id) ? null : () => _lookupNMS(job),
@@ -1285,6 +1312,76 @@ class _InstallationJobsPageState extends State<_InstallationJobsPage> {
         )),
       ],
     ),
+  );
+}
+
+class _InstallationCloseoutDialog extends StatefulWidget {
+  const _InstallationCloseoutDialog({required this.job});
+  final InstallationJob job;
+
+  @override
+  State<_InstallationCloseoutDialog> createState() => _InstallationCloseoutDialogState();
+}
+
+class _InstallationCloseoutDialogState extends State<_InstallationCloseoutDialog> {
+  late final TextEditingController _vendor = TextEditingController(text: widget.job.ontVendor);
+  late final TextEditingController _model = TextEditingController(text: widget.job.ontModel);
+  late final TextEditingController _serial = TextEditingController(text: widget.job.ontSerial);
+  late final TextEditingController _mac = TextEditingController(text: widget.job.ontMac);
+  late final TextEditingController _olt = TextEditingController(text: widget.job.oltReference);
+  late final TextEditingController _rx = TextEditingController(text: widget.job.opticalRxDbm?.toString() ?? '');
+  late final TextEditingController _notes = TextEditingController();
+  String _outcome = 'Installed';
+  String _failure = '';
+  bool _fiber = false, _powered = false, _optical = false, _wan = false;
+
+  @override
+  void dispose() {
+    for (final controller in [_vendor, _model, _serial, _mac, _olt, _rx, _notes]) { controller.dispose(); }
+    super.dispose();
+  }
+
+  void _submit() {
+    final rx = _rx.text.trim().isEmpty ? null : double.tryParse(_rx.text.trim());
+    if (_vendor.text.trim().isEmpty || _model.text.trim().isEmpty || _serial.text.trim().isEmpty ||
+        (_rx.text.trim().isNotEmpty && rx == null) || (_outcome == 'Installed' && (!_fiber || !_powered || !_optical || !_wan || rx == null)) ||
+        (_outcome != 'Installed' && (_failure.isEmpty || _notes.text.trim().isEmpty))) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Complete the required device details and checks for this outcome.')));
+      return;
+    }
+    Navigator.of(context).pop(InstallationCloseout(
+      outcome: _outcome, ontVendor: _vendor.text.trim(), ontModel: _model.text.trim(),
+      ontSerial: _serial.text.trim(), ontMac: _mac.text.trim(), oltReference: _olt.text.trim(),
+      fiberConnected: _fiber, ontPowered: _powered, opticalTestPassed: _optical,
+      opticalRxDbm: rx, wanLinkUp: _wan, failureCode: _failure, technicianNotes: _notes.text.trim(),
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Installation closeout'),
+    content: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 520), child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+      DropdownButtonFormField<String>(value: _outcome, decoration: const InputDecoration(labelText: 'Outcome'),
+        items: const [DropdownMenuItem(value: 'Installed', child: Text('Installed')), DropdownMenuItem(value: 'Failed', child: Text('Failed')), DropdownMenuItem(value: 'Needs Review', child: Text('Needs review'))],
+        onChanged: (value) { if (value != null) setState(() => _outcome = value); }),
+      TextField(controller: _vendor, maxLength: 128, decoration: const InputDecoration(labelText: 'ONT vendor')),
+      TextField(controller: _model, maxLength: 128, decoration: const InputDecoration(labelText: 'ONT model')),
+      TextField(controller: _serial, maxLength: 128, decoration: const InputDecoration(labelText: 'ONT serial')),
+      TextField(controller: _mac, maxLength: 32, decoration: const InputDecoration(labelText: 'ONT WAN MAC')),
+      TextField(controller: _olt, maxLength: 128, decoration: const InputDecoration(labelText: 'OLT / PON port')),
+      CheckboxListTile(value: _fiber, title: const Text('Fiber connected'), onChanged: (value) => setState(() => _fiber = value ?? false)),
+      CheckboxListTile(value: _powered, title: const Text('ONT powered'), onChanged: (value) => setState(() => _powered = value ?? false)),
+      CheckboxListTile(value: _optical, title: const Text('Optical test passed'), onChanged: (value) => setState(() => _optical = value ?? false)),
+      TextField(controller: _rx, keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true), decoration: const InputDecoration(labelText: 'Optical RX (dBm)')),
+      CheckboxListTile(value: _wan, title: const Text('WAN / link check passed'), onChanged: (value) => setState(() => _wan = value ?? false)),
+      if (_outcome != 'Installed') DropdownButtonFormField<String>(value: _failure, decoration: const InputDecoration(labelText: 'Failure / review code'),
+        items: const [DropdownMenuItem(value: '', child: Text('Choose a code')), DropdownMenuItem(value: 'No Signal', child: Text('No signal')), DropdownMenuItem(value: 'Low Optical Power', child: Text('Low optical power')), DropdownMenuItem(value: 'ONT Fault', child: Text('ONT fault')), DropdownMenuItem(value: 'Port/Provisioning Issue', child: Text('Port / provisioning issue')), DropdownMenuItem(value: 'Customer Premises Access', child: Text('Premises access')), DropdownMenuItem(value: 'Other', child: Text('Other'))],
+        onChanged: (value) { if (value != null) setState(() => _failure = value); }),
+      if (_outcome != 'Installed') TextField(controller: _notes, maxLength: 2000, maxLines: 3, decoration: const InputDecoration(labelText: 'Technician note')),
+      const SizedBox(height: 8),
+      const Text('Submitting records the closeout in Frappe and queues a reference-only event. It does not activate the customer in NMS.'),
+    ]))),
+    actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')), FilledButton(onPressed: _submit, child: const Text('Submit'))],
   );
 }
 

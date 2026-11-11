@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"math"
 	"net/http"
 	"regexp"
 	"time"
@@ -17,6 +18,7 @@ var errOperationsAccess = errors.New("account access unavailable")
 
 var operationDocumentName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._-]{0,139}$`)
 var operationNMSNumber = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+var operationMAC = regexp.MustCompile(`(?i)^([0-9a-f]{2}:){5}[0-9a-f]{2}$`)
 
 type operationsAPI struct {
 	identity    *googleIdentityAPI
@@ -210,6 +212,53 @@ func (api *operationsAPI) getInstallationJobNMSReference(w http.ResponseWriter, 
 		"nms_modem_id": modemID,
 		"match_status": "exact_mac_match",
 	}})
+}
+
+func (api *operationsAPI) submitInstallationCloseout(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	principal, _, err := api.authorizeISPStaff(ctx, r, "isp.technician")
+	if err != nil {
+		writeOperationsError(w, err)
+		return
+	}
+	name := r.PathValue("jobID")
+	if !operationDocumentName.MatchString(name) {
+		writeAuthJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid installation job reference"})
+		return
+	}
+	var closeout integrations.InstallationCloseoutInput
+	if err := decodeStrictJSON(w, r, &closeout, 16<<10); err != nil {
+		writeAuthJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid installation closeout payload"})
+		return
+	}
+	if (closeout.Outcome != "Installed" && closeout.Outcome != "Failed" && closeout.Outcome != "Needs Review") ||
+		len(closeout.ONTVendor) == 0 || len(closeout.ONTVendor) > 128 ||
+		len(closeout.ONTModel) == 0 || len(closeout.ONTModel) > 128 ||
+		len(closeout.ONTSerial) == 0 || len(closeout.ONTSerial) > 128 ||
+		len(closeout.ONTMAC) > 32 || len(closeout.OLTReference) > 128 || len(closeout.FailureCode) > 80 || len(closeout.TechnicianNotes) > 2000 ||
+		(closeout.ONTMAC != "" && !operationMAC.MatchString(closeout.ONTMAC)) ||
+		(closeout.OpticalRXDBM != nil && (math.IsNaN(*closeout.OpticalRXDBM) || math.IsInf(*closeout.OpticalRXDBM, 0) || *closeout.OpticalRXDBM < -100 || *closeout.OpticalRXDBM > 20)) {
+		writeAuthJSON(w, http.StatusBadRequest, map[string]string{"error": "installation closeout fields are invalid"})
+		return
+	}
+	target, err := api.integrations.forOrganization(principal.OrganizationID.String)
+	if err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "operations integration unavailable"})
+		return
+	}
+	frappeUser, ok := target.frappeTechnicians[principal.IdentityID]
+	if !ok || frappeUser == "" {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "technician account mapping unavailable"})
+		return
+	}
+	result, err := target.frappe.SubmitInstallationCloseout(ctx, principal.OrganizationID.String, name, frappeUser, closeout)
+	if err != nil {
+		writeIntegrationError(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeAuthJSON(w, http.StatusOK, map[string]any{"installation_closeout": result})
 }
 
 func writeOperationsError(w http.ResponseWriter, err error) {

@@ -236,11 +236,11 @@ class NMSContractReference {
 
 class InstallationJob {
   const InstallationJob({required this.id, required this.acquisition, required this.outcome,
-    required this.ontSerial, required this.ontMac, required this.oltReference,
+    required this.ontVendor, required this.ontModel, required this.ontSerial, required this.ontMac, required this.oltReference,
     required this.fiberConnected, required this.ontPowered, required this.opticalTestPassed,
     required this.opticalRxDbm, required this.wanLinkUp});
 
-  final String id, acquisition, outcome, ontSerial, ontMac, oltReference;
+  final String id, acquisition, outcome, ontVendor, ontModel, ontSerial, ontMac, oltReference;
   final bool fiberConnected, ontPowered, opticalTestPassed, wanLinkUp;
   final double? opticalRxDbm;
 
@@ -254,7 +254,8 @@ class InstallationJob {
     final optical = json['optical_rx_dbm'];
     if (optical != null && optical is! num) throw const ApiException('Installation job response was invalid.');
     return InstallationJob(id: text('name'), acquisition: text('acquisition_request'),
-      outcome: text('installation_outcome'), ontSerial: text('ont_serial'), ontMac: text('ont_mac'),
+      outcome: text('installation_outcome'), ontVendor: text('ont_vendor'), ontModel: text('ont_model'),
+      ontSerial: text('ont_serial'), ontMac: text('ont_mac'),
       oltReference: text('olt_reference'), fiberConnected: check('fiber_connected'),
       ontPowered: check('ont_powered'), opticalTestPassed: check('optical_test_passed'),
       opticalRxDbm: (optical as num?)?.toDouble(), wanLinkUp: check('wan_link_up'));
@@ -276,6 +277,33 @@ class NMSModemReference {
     }
     return NMSModemReference(installationJob: job, modemId: id, matchStatus: status as String);
   }
+}
+
+class InstallationCloseout {
+  const InstallationCloseout({required this.outcome, required this.ontVendor, required this.ontModel,
+    required this.ontSerial, required this.ontMac, required this.oltReference,
+    required this.fiberConnected, required this.ontPowered, required this.opticalTestPassed,
+    required this.opticalRxDbm, required this.wanLinkUp, required this.failureCode,
+    required this.technicianNotes});
+  final String outcome, ontVendor, ontModel, ontSerial, ontMac, oltReference, failureCode, technicianNotes;
+  final bool fiberConnected, ontPowered, opticalTestPassed, wanLinkUp;
+  final double? opticalRxDbm;
+
+  Map<String, dynamic> toJson() => {
+    'installation_outcome': outcome,
+    'ont_vendor': ontVendor,
+    'ont_model': ontModel,
+    'ont_serial': ontSerial,
+    'ont_mac': ontMac,
+    'olt_reference': oltReference,
+    'fiber_connected': fiberConnected,
+    'ont_powered': ontPowered,
+    'optical_test_passed': opticalTestPassed,
+    'optical_rx_dbm': opticalRxDbm,
+    'wan_link_up': wanLinkUp,
+    'failure_code': failureCode,
+    'technician_notes': technicianNotes,
+  };
 }
 
 String newIdempotencyKey() {
@@ -566,6 +594,18 @@ class OmishaApi {
     final value = response['nms_modem_reference'];
     if (value is! Map) throw const ApiException('The NMS device match response was invalid.');
     return NMSModemReference.fromJson(Map<String, dynamic>.from(value));
+  }
+
+  Future<String> submitInstallationCloseout({required String accessToken, required String jobId, required InstallationCloseout closeout}) async {
+    if (jobId.isEmpty || jobId.length > 140) throw const ApiException('The installation job reference was invalid.');
+    final response = await _send('POST', 'v1/me/isp/technician/installation-jobs/${Uri.encodeComponent(jobId)}/closeout',
+      token: accessToken, body: closeout.toJson());
+    final value = response['installation_closeout'];
+    if (value is! Map || value['installation_job'] != jobId ||
+        (value['state'] != 'submitted' && value['state'] != 'already_submitted')) {
+      throw const ApiException('The installation closeout response was invalid.');
+    }
+    return value['state'] as String;
   }
 
   Future<void> logout(String identityToken) async {
