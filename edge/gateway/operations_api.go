@@ -11,6 +11,10 @@ import (
 	"omisha.network/edge-gateway/integrations"
 )
 
+var errOperationsUnavailable = errors.New("operations unavailable")
+var errOperationsAuthentication = errors.New("authentication required")
+var errOperationsAccess = errors.New("account access unavailable")
+
 var operationDocumentName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._-]{0,139}$`)
 var operationNMSNumber = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 
@@ -22,11 +26,11 @@ type operationsAPI struct {
 func (api *operationsAPI) authorizeISPStaff(ctx context.Context, r *http.Request, roles ...string) (sessionPrincipal, string, error) {
 	var empty sessionPrincipal
 	if api == nil || api.identity == nil || api.identity.db == nil || api.identity.configErr != nil {
-		return empty, "", errors.New("operations unavailable")
+		return empty, "", errOperationsUnavailable
 	}
 	principal, err := api.identity.authenticateSession(ctx, r, "context")
 	if err != nil || !principal.OrganizationID.Valid || !principal.MembershipID.Valid {
-		return empty, "", errors.New("authentication required")
+		return empty, "", errOperationsAuthentication
 	}
 	var role string
 	err = api.identity.db.QueryRowContext(ctx,
@@ -42,14 +46,14 @@ func (api *operationsAPI) authorizeISPStaff(ctx context.Context, r *http.Request
 		principal.MembershipID.String, principal.IdentityID, principal.OrganizationID.String,
 	).Scan(&role)
 	if err != nil {
-		return empty, "", errors.New("account access unavailable")
+		return empty, "", errOperationsAccess
 	}
 	for _, allowed := range roles {
 		if role == allowed {
 			return principal, role, nil
 		}
 	}
-	return empty, "", errors.New("account access unavailable")
+	return empty, "", errOperationsAccess
 }
 
 func (api *operationsAPI) getAcquisition(w http.ResponseWriter, r *http.Request) {
@@ -140,8 +144,10 @@ func writeOperationsError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, context.DeadlineExceeded):
 		writeAuthJSON(w, http.StatusGatewayTimeout, map[string]string{"error": "operations request timed out"})
-	case err.Error() == "authentication required":
+	case errors.Is(err, errOperationsAuthentication):
 		writeAuthJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+	case errors.Is(err, errOperationsUnavailable):
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "operations service unavailable"})
 	default:
 		writeAuthJSON(w, http.StatusForbidden, map[string]string{"error": "account access unavailable"})
 	}
