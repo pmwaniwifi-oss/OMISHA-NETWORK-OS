@@ -28,7 +28,7 @@ Google proves account identity; it does not prove that the person is an ISP subs
 - An authorized ISP admin issues ISP-bound staff/customer invitations. The invitation record fixes the allowed organization, role/scope, expiry and recipient restriction; the link cannot grant a role by changing URL parameters.
 - An end customer may also start in self-care without an invite. Serviceability, applicable identity checks and a server-verified/reconciled payment must pass before paid service onboarding is finalized.
 - Every invite recipient signs in with Google. Offline Aadhaar verification is a separate identity-proof step only if the operator confirms the legal basis, approved method, consent/alternatives and OVSE applicability. Aadhaar is never a login provider and raw Aadhaar files must not be retained in normal app storage.
-- Google identity alone creates no ISP, staff, customer-paid or admin entitlement. The server redeems the invitation once and creates the approved membership; all such flows are still planned and have no implementation/API yet.
+- Google identity alone creates no ISP, staff, customer-paid or admin entitlement. The identity database migration now defines hashed invitation records, but create/redeem APIs and membership provisioning are not implemented yet.
 
 ## Session handling
 
@@ -61,7 +61,7 @@ The Flutter UI calls a native Android Credential Manager bridge for Google sign-
 
 The app sends the Google ID token plus `challenge_id` to `POST /v1/auth/social/google`; the Go backend must verify token signature, issuer, audience, expiry and exact nonce claim against Google's current keys, then consume the challenge atomically. Use Google's stable subject as the provider identity. Do not accept client-supplied role/tenant data, auto-link accounts solely by a typed email, or grant employee/ISP roles from Google sign-in. Staff and ISP memberships require server-side invitation/approval; customer service still requires the applicable contact/subscriber checks. Request no Google data-access scopes beyond basic sign-in.
 
-The Go gateway source has Google challenge/token exchange, approved-context discovery/activation, current-context lookup and session-family logout routes. These require the identity Compose overlay, applied migrations/runtime grants, `OMISHA_GOOGLE_SERVER_CLIENT_ID`, and secret files. The native bridge and Go integration have not been validated together in an Android build. Invitation creation/redemption, membership provisioning, self-care payment and tenant business APIs are not implemented, so no complete customer or staff enrollment is operational. OTP/password login is intentionally not offered.
+The Go gateway source has Google challenge/token exchange, approved-context discovery/activation, current-context lookup and session-family logout routes. These require the identity Compose overlay, applied migrations/runtime grants, `OMISHA_GOOGLE_SERVER_CLIENT_ID`, and secret files. The native bridge and Go integration have not been validated together in an Android build. Invitation records have a database migration, but invitation creation/redemption APIs, membership provisioning, self-care payment and tenant business APIs are not implemented, so no complete customer or staff enrollment is operational. OTP/password login is intentionally not offered.
 
 ## Games, reels, and monetization boundary
 
