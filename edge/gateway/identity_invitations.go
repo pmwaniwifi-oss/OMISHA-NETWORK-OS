@@ -355,6 +355,153 @@ func activeContextRole(ctx context.Context, tx *sql.Tx, principal sessionPrincip
 	return role, organizationType, err
 }
 
+type invitationSummary struct {
+	ID        string     `json:"invitation_id"`
+	RoleCode  string     `json:"role_code"`
+	Status    string     `json:"status"`
+	CreatedAt time.Time  `json:"created_at"`
+	ExpiresAt time.Time  `json:"expires_at"`
+	RedeemedAt *time.Time `json:"redeemed_at,omitempty"`
+	RevokedAt *time.Time  `json:"revoked_at,omitempty"`
+}
+
+func (api *googleIdentityAPI) listWorkspaceInvitations(w http.ResponseWriter, r *http.Request) {
+	if !api.invitationServiceReady(w, r) { return }
+	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+	defer cancel()
+	principal, err := api.authenticateSession(ctx, r, "context")
+	if err != nil {
+		writeAuthJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+		return
+	}
+	role, orgType, err := api.activeContextRoleRead(ctx, principal)
+	if err != nil || !mayManageInvitations(orgType, role) {
+		writeAuthJSON(w, http.StatusForbidden, map[string]string{"error": "invitation permission denied"})
+		return
+	}
+	rows, err := api.db.QueryContext(ctx,
+		`SELECT invitation_id::text, role_code, status, created_at, expires_at, redeemed_at, revoked_at
+		 FROM account_invitations
+		 WHERE organization_id = $1
+		 ORDER BY created_at DESC LIMIT 50`,
+		principal.OrganizationID.String)
+	if err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation list unavailable"})
+		return
+	}
+	defer rows.Close()
+	items := make([]invitationSummary, 0, 16)
+	for rows.Next() {
+		var item invitationSummary
+		var redeemedAt, revokedAt sql.NullTime
+		if err := rows.Scan(&item.ID, &item.RoleCode, &item.Status, &item.CreatedAt, &item.ExpiresAt, &redeemedAt, &revokedAt); err != nil {
+			writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation list unavailable"})
+			return
+		}
+		if redeemedAt.Valid { item.RedeemedAt = &redeemedAt.Time }
+		if revokedAt.Valid { item.RevokedAt = &revokedAt.Time }
+		items = append(items, item)
+	}
+	if rows.Err() != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation list unavailable"})
+		return
+	}
+	writeAuthJSON(w, http.StatusOK, map[string]any{"invitations": items})
+}
+
+func (api *googleIdentityAPI) revokeWorkspaceInvitation(w http.ResponseWriter, r *http.Request) {
+	if !api.invitationServiceReady(w, r) { return }
+	id := r.PathValue("invitationID")
+	if !challengeIDPattern.MatchString(id) {
+		writeAuthJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid invitation id"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+	defer cancel()
+	tx, err := api.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation revoke unavailable"})
+		return
+	}
+	defer tx.Rollback()
+	principal, err := api.authenticateSessionTx(ctx, tx, r, "context")
+	if err != nil {
+		writeAuthJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+		return
+	}
+	role, orgType, err := activeContextRole(ctx, tx, principal)
+	if err != nil || !mayManageInvitations(orgType, role) {
+		writeAuthJSON(w, http.StatusForbidden, map[string]string{"error": "invitation permission denied"})
+		return
+	}
+	var status string
+	err = tx.QueryRowContext(ctx,
+		`SELECT status FROM account_invitations
+		 WHERE invitation_id = $1 AND organization_id = $2 FOR UPDATE`,
+		id, principal.OrganizationID.String).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeAuthJSON(w, http.StatusNotFound, map[string]string{"error": "invitation not found"})
+		return
+	}
+	if err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation revoke unavailable"})
+		return
+	}
+	if status == "redeemed" {
+		writeAuthJSON(w, http.StatusConflict, map[string]string{"error": "redeemed invitation cannot be revoked; remove membership separately"})
+		return
+	}
+	if status == "revoked" {
+		if err := tx.Commit(); err != nil {
+			writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation revoke unavailable"})
+			return
+		}
+		writeAuthJSON(w, http.StatusOK, map[string]bool{"revoked": true})
+		return
+	}
+	result, err := tx.ExecContext(ctx,
+		`UPDATE account_invitations SET status = 'revoked', revoked_by_identity_id = $2, revoked_at = now()
+		 WHERE invitation_id = $1 AND organization_id = $3 AND status = 'pending'`,
+		id, principal.IdentityID, principal.OrganizationID.String)
+	if err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation revoke unavailable"})
+		return
+	}
+	changed, err := result.RowsAffected()
+	if err != nil || changed != 1 {
+		writeAuthJSON(w, http.StatusConflict, map[string]string{"error": "invitation is no longer pending"})
+		return
+	}
+	if err := insertEnrollmentAudit(ctx, tx, principal.IdentityID, principal.OrganizationID.String, "enrollment.invitation.revoked", "success"); err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation revoke unavailable"})
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation revoke unavailable"})
+		return
+	}
+	writeAuthJSON(w, http.StatusOK, map[string]bool{"revoked": true})
+}
+
+func (api *googleIdentityAPI) activeContextRoleRead(ctx context.Context, principal sessionPrincipal) (string, string, error) {
+	var role, orgType string
+	err := api.db.QueryRowContext(ctx,
+		`SELECT m.role_code, o.organization_type
+		 FROM sessions s JOIN memberships m ON m.membership_id = s.membership_id AND m.identity_id = s.identity_id
+		 JOIN organizations o ON o.organization_id = s.organization_id
+		 JOIN identities i ON i.identity_id = s.identity_id
+		 WHERE s.session_id = $1 AND i.status = 'active'
+		   AND m.status = 'active' AND m.approved_at IS NOT NULL
+		   AND o.status = 'active' AND (m.expires_at IS NULL OR m.expires_at > now())`,
+		principal.SessionID).Scan(&role, &orgType)
+	return role, orgType, err
+}
+
+func mayManageInvitations(orgType, role string) bool {
+	if orgType == "omisha_workspace" { return role == "omisha.platform_admin" }
+	return orgType == "isp_tenant" && (role == "isp.owner" || role == "isp.admin")
+}
+
 func mayInvite(orgType, issuerRole, invitedRole string) bool {
 	if orgType == "omisha_workspace" {
 		return issuerRole == "omisha.platform_admin" && invitedRole == "omisha.staff"
