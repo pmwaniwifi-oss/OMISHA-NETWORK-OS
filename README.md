@@ -4,7 +4,7 @@ Project planning and installer draft for an integrated ISP platform.
 
 ## Current status
 
-- [Git-managed NMS and Frappe baseline](deploy/README.md): pinned upstream source submodules, Frappe Docker pilot configuration and read-only Go adapter libraries. The official `nmsprime/nmsprime` repository says it moved to `cablelabs/os-provisioning`; the project pins that source at `117cf48e917681c6c47ba966132c2fbf1e606f4b`. Official docs describe FTTH provisioning via TR-069/RADIUS and a REST/JSON API. The deployed edition/release and API schema still require confirmation; configuration checks are not live integration.
+- [Git-managed NMS and Frappe baseline](deploy/README.md): pinned upstream source submodules, Frappe Docker pilot configuration and read-only Go adapter libraries. The NMS-source audit at [`docs/nms-prime/pinned-source-api-audit.md`](docs/nms-prime/pinned-source-api-audit.md) records the exact source API shape and provisioning side effects. The deployed edition/release and API schema still require confirmation; no live NMS integration is configured.
 - [Data ownership and duplicate-data controls](docs/data-ownership-and-minimization.md): one source of truth per fact, stable cross-system references and bounded projections.
 - `apps/omisha_isp/`: initial Frappe app source for service orders and a reference-only transactional outbox. It is not yet packaged into the ERPNext image or installed on a live site.
 
@@ -13,7 +13,7 @@ Project planning and installer draft for an integrated ISP platform.
 
 - `docs/cloud-deployment-and-licensing.md`: proposed OMISHA-hosted, per-client cloud and per-user licensing design.
 - `licensing/` and `docker-compose.yml`: development foundation for signed offline license verification and an online activation client. This does not yet enforce Frappe user seats or implement an online license authority. Compose runs only the licensing component, not the full platform.
-- `edge/`: local VM prototype with a Go gateway, Rust worker, Valkey cache and read-only NMS/ERP adapter libraries, including bounded Frappe onboarding/service-order projections and minimal NMS contract/CPE lookup references. Google identity/session/invitation source exists on the draft branch but is not validated or production-ready. Customer business routes, Frappe/NMS connections and actual background jobs remain unimplemented; it must not be exposed to the internet.
+- `edge/`: local VM prototype with a Go gateway, Rust worker, Valkey cache and read-only NMS/ERP adapters. Source includes Frappe onboarding/service-order reads, assigned technician job listing, and exact ONT-MAC-to-NMS modem reference matching. It does not provision or activate a network service. The private integration registry is not configured and deployed NMS compatibility is unverified. Google identity/session/invitation source exists on the draft branch but is not validated or production-ready; the stack must not be exposed to the internet.
 - `docs/verification-status.md`: current checks and unresolved gaps.
 
 - `docs/frappe/`: ERPNext/Frappe integration architecture and performance proposal. This is the recommended business-platform direction.
@@ -24,11 +24,11 @@ The Frappe and Odoo designs are alternative tracks. CRM, helpdesk, HR, accounts,
 
 ## Delivery order
 
-Follow [Core product before authentication](docs/delivery/core-product-before-auth.md): complete the Frappe workflows, verify and integrate the actual NMS Prime product, and finish the Flutter product flows before extending or releasing authentication. Existing authentication source is a scaffold only; the current draft PR is not an operational system.
+Follow [Core product before authentication](docs/delivery/core-product-before-auth.md): verify and integrate NMS Prime as the network system of record, coordinate business workflows through Frappe/ERPNext, and finish Flutter product flows before extending or releasing authentication. Existing authentication source is a scaffold only; the current draft PR is not an operational system.
 
 ## Proposed direction
 
-NMS Prime manages network/subscriber operations; ERPNext and the Frappe ecosystem manage business workflows; Zabbix provides monitoring; a dedicated API serves a Flutter app; PM-WANI uses a role-specific adapter; and n8n handles approved asynchronous workflows. Pin compatible component versions and verify NMS interfaces before implementation.
+NMS Prime manages network/subscriber operations; ERPNext and the Frappe ecosystem manage business, payment and accounting workflows; Zabbix provides monitoring; a dedicated API serves a Flutter app; PM-WANI uses a role-specific adapter; and n8n handles approved asynchronous workflows. Pin compatible component versions and verify NMS interfaces before enabling provisioning.
 
 # Reporting implementation
 

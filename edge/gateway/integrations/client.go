@@ -168,6 +168,42 @@ type InstallationJobProjection struct {
 	Docstatus int `json:"docstatus"`
 }
 
+// AssignedInstallationJob resolves one job only when the mapped Frappe user
+// is its assigned technician. It is used before looking up a device in NMS.
+func (c *Client) AssignedInstallationJob(ctx context.Context, tenant, name, user string) (InstallationJobProjection, error) {
+	var result InstallationJobProjection
+	if c.kind != "frappe" || !document.MatchString(name) || !frappeUser.MatchString(user) {
+		return result, errors.New("invalid installation job request")
+	}
+	fields, _ := json.Marshal([]string{"name", "assigned_technician", "ont_mac", "docstatus"})
+	query := url.Values{}
+	query.Set("fields", string(fields))
+	raw, err := c.read(ctx, tenant, "/api/resource/ISP%20Installation%20Job/"+url.PathEscape(name)+"?"+query.Encode())
+	if err != nil {
+		return result, err
+	}
+	var envelope struct {
+		Data struct {
+			Name string `json:"name"`
+			AssignedTechnician string `json:"assigned_technician"`
+			ONTMAC string `json:"ont_mac"`
+			Docstatus int `json:"docstatus"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(raw, &envelope) != nil || envelope.Data.Name != name {
+		return result, ErrNotFound
+	}
+	if envelope.Data.AssignedTechnician != user {
+		return result, ErrTenant
+	}
+	if envelope.Data.Docstatus != 0 {
+		return result, ErrNotFound
+	}
+	result.Name = name
+	result.ONTMAC = strings.TrimSpace(envelope.Data.ONTMAC)
+	return result, nil
+}
+
 // AssignedInstallationJobs returns at most 50 open jobs assigned to one
 // operator-mapped Frappe user. The caller must derive the user mapping server-side.
 func (c *Client) AssignedInstallationJobs(ctx context.Context, tenant, user string) ([]InstallationJobProjection, error) {

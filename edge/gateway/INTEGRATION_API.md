@@ -27,7 +27,7 @@ This is a schema illustration only; the example UUID and credentials are not rea
 
 The `frappe_technicians` map is optional and operator-maintained. Keys are OMISHA identity UUIDs and values are the corresponding Frappe User IDs; never accept this mapping from a mobile request. The Frappe user must have the ISP Technician role and be the `assigned_technician` on each job. The map contains account identifiers, so keep it in the private runtime secret file.
 
-The NMS Prime API docs describe Basic Auth and the default API user as full create/modify/delete access; fine-grained API permissions are described as planned. Although these gateway methods issue GET requests only, the NMS credential is high impact. Keep the NMS origin on a private network with verified TLS; do not expose its admin API to Flutter or the public internet. If a service user cannot be restricted in the deployed release, isolate the connector at the network layer and review the risk before enabling the registry.
+The pinned NMS source uses HTTP Basic Auth, requires the `use api` ability, and applies model-action abilities on generated REST routes. Create a dedicated user with only the required `view` abilities for Contract/Modem reads, then verify those grants and custom routes in the deployed release. Keep the NMS origin private with verified TLS; do not expose its admin API to Flutter or the public internet. Several custom state-changing modem actions use GET, so this adapter allows only fixed resource read paths and does not accept arbitrary paths. Any mutation route remains disabled until the deployed schema, user abilities, side effects and idempotency behavior are reviewed.
 
 ## Flutter-facing routes
 
@@ -39,8 +39,9 @@ All routes require a server-issued context-scoped bearer token. The gateway reva
 | GET /v1/me/isp/service-orders/{id} | isp.owner, isp.admin, isp.support | Name, plan reference, service state and NMS external service reference. No customer profile or raw NMS object. |
 | GET /v1/me/isp/nms/contracts/{number} | isp.owner, isp.admin | Exact NMS contract number lookup returning only the NMS object ID. Multiple matches return conflict for manual reconciliation. |
 | GET /v1/me/isp/technician/installation-jobs | isp.technician | At most 50 open jobs assigned to the authenticated technician's operator-mapped Frappe user; returns device references and installation checks only. |
+| GET /v1/me/isp/technician/installation-jobs/{jobID}/nms-reference | isp.technician | Verifies the job belongs to the signed-in technician, then exact-matches its ONT WAN MAC in this tenant's NMS Prime and returns only the NMS modem ID. |
 
-The Flutter app has typed clients for these reads, a staff lookup screen, and a technician's assigned open-job list. The technician list is read-only: closeout submission is not yet available from Flutter. Backend business authorization is independent of UI visibility. Customers do not have these broad lookup privileges; customer-to-ERP customer ownership mapping remains unimplemented. No acquisition creation, payment, contract creation, modem creation, install closeout API, or provisioning write is available from Flutter.
+The Flutter app has typed clients for these reads, a staff lookup screen, a technician's assigned open-job list, and an explicit NMS modem-reference match action. The technician path is read-only: a match proves only that one modem record has the recorded MAC; it does not prove ACS provisioning, AAA/RADIUS authorization, or service activation. Closeout submission is not yet available from Flutter. Backend business authorization is independent of UI visibility. Customers do not have these broad lookup privileges; customer-to-ERP customer ownership mapping remains unimplemented. No acquisition creation, payment, contract creation, modem creation, install closeout API, or provisioning write is available from Flutter.
 
 ## Data ownership and next slice
 

@@ -261,6 +261,23 @@ class InstallationJob {
   }
 }
 
+class NMSModemReference {
+  const NMSModemReference({required this.installationJob, required this.modemId, required this.matchStatus});
+  final String installationJob;
+  final int modemId;
+  final String matchStatus;
+
+  factory NMSModemReference.fromJson(Map<String, dynamic> json) {
+    final job = json['installation_job'];
+    final id = json['nms_modem_id'];
+    final status = json['match_status'];
+    if (job is! String || job.isEmpty || job.length > 160 || id is! int || id <= 0 || status != 'exact_mac_match') {
+      throw const ApiException('The NMS device match response was invalid.');
+    }
+    return NMSModemReference(installationJob: job, modemId: id, matchStatus: status as String);
+  }
+}
+
 String newIdempotencyKey() {
   final random = Random.secure();
   final bytes = List<int>.generate(16, (_) => random.nextInt(256));
@@ -541,6 +558,14 @@ class OmishaApi {
       throw const ApiException('The installation job list response was invalid.');
     }
     return values.map((value) => InstallationJob.fromJson(Map<String, dynamic>.from(value as Map))).toList(growable: false);
+  }
+
+  Future<NMSModemReference> getNMSReferenceForInstallationJob({required String accessToken, required String jobId}) async {
+    if (jobId.isEmpty || jobId.length > 140) throw const ApiException('The installation job reference was invalid.');
+    final response = await _send('GET', 'v1/me/isp/technician/installation-jobs/${Uri.encodeComponent(jobId)}/nms-reference', token: accessToken);
+    final value = response['nms_modem_reference'];
+    if (value is! Map) throw const ApiException('The NMS device match response was invalid.');
+    return NMSModemReference.fromJson(Map<String, dynamic>.from(value));
   }
 
   Future<void> logout(String identityToken) async {

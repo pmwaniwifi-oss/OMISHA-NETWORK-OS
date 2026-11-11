@@ -1216,6 +1216,9 @@ class _InstallationJobsPage extends StatefulWidget {
 
 class _InstallationJobsPageState extends State<_InstallationJobsPage> {
   List<InstallationJob> _jobs = const [];
+  final Map<String, int> _nmsMatches = {};
+  final Map<String, String> _nmsErrors = {};
+  final Set<String> _nmsBusy = {};
   String? _error;
   bool _busy = false;
 
@@ -1231,6 +1234,20 @@ class _InstallationJobsPageState extends State<_InstallationJobsPage> {
       if (mounted) setState(() => _error = error is ApiException ? error.message : 'Could not load installation jobs.');
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _lookupNMS(InstallationJob job) async {
+    setState(() { _nmsBusy.add(job.id); _nmsErrors.remove(job.id); });
+    try {
+      final reference = await widget.api.getNMSReferenceForInstallationJob(
+        accessToken: widget.accessToken, jobId: job.id,
+      );
+      if (mounted) setState(() => _nmsMatches[job.id] = reference.modemId);
+    } catch (error) {
+      if (mounted) setState(() => _nmsErrors[job.id] = error is ApiException ? error.message : 'NMS device lookup failed.');
+    } finally {
+      if (mounted) setState(() => _nmsBusy.remove(job.id));
     }
   }
 
@@ -1256,6 +1273,14 @@ class _InstallationJobsPageState extends State<_InstallationJobsPage> {
             const SizedBox(height: 8),
             Text('Checks: fiber ${job.fiberConnected ? '✓' : '—'} · power ${job.ontPowered ? '✓' : '—'} · optical ${job.opticalTestPassed ? '✓' : '—'} · WAN ${job.wanLinkUp ? '✓' : '—'}'),
             if (job.opticalRxDbm != null) Text('Optical RX: ${job.opticalRxDbm} dBm'),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: _nmsBusy.contains(job.id) ? null : () => _lookupNMS(job),
+              icon: _nmsBusy.contains(job.id) ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.hub_outlined),
+              label: const Text('Match device in NMS Prime'),
+            ),
+            if (_nmsMatches.containsKey(job.id)) Text('Exact ONT MAC match: NMS modem #${_nmsMatches[job.id]}'),
+            if (_nmsErrors.containsKey(job.id)) _InlineError(_nmsErrors[job.id]!),
           ]),
         )),
       ],

@@ -1,6 +1,6 @@
 # Core Product Delivery Order
 
-**Decision:** Complete the Frappe business workflows, the verified NMS Prime integration, and the Flutter main-app product flows before extending authentication. The current Google identity/invitation code is an early scaffold only; do not treat it as an operational login release or expand it while these core product layers are incomplete.
+**Decision:** NMS Prime is the network system of record and the first critical-path integration. Complete its deployed-version/API verification and a controlled network workflow, with Frappe/ERPNext owning business, payment and accounting records and Flutter calling both only through the OMISHA API. Complete these product layers before extending authentication. The current Google identity/invitation code is an early scaffold only; it is not an operational login release.
 
 ## What “complete first” means
 
@@ -8,12 +8,34 @@ Completion is a reviewable, integrated vertical slice—not merely adding menu s
 
 ## Ordered implementation
 
-### 1. Frappe / ERPNext business workflows
+### 1. NMS Prime / network integration
+
+**Discovery dependency**
+
+The user's link resolves to nmsprime/nmsprime, whose README says the project moved to cablelabs/os-provisioning. The repository submodule is pinned to that official source at commit 117cf48e917681c6c47ba966132c2fbf1e606f4b. Its README describes the Community Edition OSS Provisioning layer for FTTH/DSL/WiFi using TR-069 and RADIUS; the official overview describes CPE/modem provisioning and BNG/BRAS/IP-pool/QoS management. The user's link therefore confirms the source identity. Still confirm which NMS Prime edition/release is deployed and that its host API spec matches the pinned source before integration.
+
+**Scope after discovery**
+
+- Build a narrow versioned adapter for NMS Prime's documented REST/JSON API under `/admin/api/v0` for only the needed customer/contract, product/QoS, CPE/ONT and status workflows. Pinned source uses HTTP Basic Auth (email as username), requires `use api`, and applies model-action abilities to generated REST routes. Create a dedicated API user with only required view rights for reads, then verify its actual abilities and custom action protections in the deployed release. Keep NMS private, use verified TLS and secret files, never expose its API to Flutter, and put a fixed allowlisted connector behind the OMISHA BFF. Confirm endpoint schemas and side effects from the matching deployed release before writes. Build provisioning, read-back, suspend/restore and deprovisioning only where that release supports them.
+- Keep Frappe as business record owner and NMS/OLT/BNG/AAA as network-state authorities; correlate by stable service/device references, never names alone.
+- Model zero-touch installation: technician records the device and optical/link result; supported ACS (TR-069/CWMP) or a separately verified USP Controller enrolls/configures compatible CPE; this pinned source documents TR-069/CWMP, not TR-369. The access/AAA path enables the subscriber session; only authoritative read-back/session evidence advances Active/Ready.
+- Store no device-management or subscriber secrets in plaintext logs or Git. Use bounded retries, idempotency, reconciliation and a manual recovery queue.
+- Keep all live provisioning writes behind explicit environment and operator gates until a controlled pilot proves rollback and recovery.
+
+**Acceptance**
+
+- Vendor-confirmed API contract and representative test device/site exist.
+- First boot, duplicate/wrong device, interrupted provisioning, replacement/factory reset, stale profile, AAA reject, timeout/retry, suspend/restore and rollback are exercised in a controlled test environment.
+- Successful provisioning read-back maps to exactly one service and tenant; failed/unknown devices never become Active.
+- Replaying the same event cannot create duplicate network profiles or customer services.
+
+
+### 2. Frappe / ERPNext business workflows
 
 **Scope**
 
 - Pin one compatible Frappe, ERPNext, CRM, Helpdesk, HR, and India Compliance release set and package the custom OMISHA ISP app into a reproducible image.
-- Complete the client-site workflow for lead/customer, address, plan, service acquisition, technician installation, service order, Payment Request/Entry references, support links, and draft billing/reporting handoff.
+- Complete the client-site workflow for lead/customer, address, plan, service acquisition, technician installation, service order, Payment Request/Entry references, support links, and draft billing/reporting handoff; Frappe events coordinate the NMS workflow without becoming the network authority.
 - Keep ERPNext as the single owner of customer/accounting documents; the custom ISP app owns workflow state, cross-system references, and the transactional outbox.
 - Finish role/permission rules and server-side transitions; mobile clients must never set payment, identity, installation, NMS, or activation outcome fields.
 - Add durable outbox dispatch, retry/backoff, dead-letter/reconciliation views, and idempotency. Outbox payloads remain references, not copies of ERPNext customer/payment data.
@@ -26,27 +48,6 @@ Completion is a reviewable, integrated vertical slice—not merely adding menu s
 - Duplicate/retried submissions do not create duplicate ERPNext or operations records.
 - Payment remains ERPNext-owned; workflow cannot mark a payment confirmed from client input.
 - Permissions prevent cross-client data access; failure/replay and restore procedures are documented and reviewable.
-
-### 2. NMS Prime / network integration
-
-**Discovery dependency**
-
-The user's link resolves to nmsprime/nmsprime, whose README says the project moved to cablelabs/os-provisioning. The repository submodule is pinned to that official source at commit 117cf48e917681c6c47ba966132c2fbf1e606f4b. Its README describes the Community Edition OSS Provisioning layer for FTTH/DSL/WiFi using TR-069 and RADIUS; the official overview describes CPE/modem provisioning and BNG/BRAS/IP-pool/QoS management. The user's link therefore confirms the source identity. Still confirm which NMS Prime edition/release is deployed and that its host API spec matches the pinned source before integration.
-
-**Scope after discovery**
-
-- Build a narrow versioned adapter for NMS Prime's documented REST/JSON API under /admin/api/v0 for only the needed customer/contract, product/QoS, CPE/ONT and status workflows. The official API documentation describes HTTP Basic Auth using an NMS user email/password and says the default api@localhost account can create/modify/delete any object; fine-grained per-object API authorization is described as planned. Therefore keep NMS private, use TLS, keep credentials in secret files, never expose this API to Flutter, and put an allowlisted narrow connector between Frappe and NMS. Do not grant arbitrary object CRUD to customer-facing code. Confirm endpoint schemas and side effects from the deployment's matching OpenAPI spec before writes. Build provisioning, read-back, suspend/restore and deprovisioning only where the deployed API supports them.
-- Keep Frappe as business record owner and NMS/OLT/BNG/AAA as network-state authorities; correlate by stable service/device references, never names alone.
-- Model zero-touch installation: technician records the device and optical/link result; supported ACS (TR-069/CWMP) or USP Controller (TR-369) securely enrolls/configures compatible CPE; access/AAA path enables the subscriber session; only authoritative read-back/session evidence advances Active/Ready.
-- Store no device-management or subscriber secrets in plaintext logs or Git. Use bounded retries, idempotency, reconciliation and a manual recovery queue.
-- Keep all live provisioning writes behind explicit environment and operator gates until a controlled pilot proves rollback and recovery.
-
-**Acceptance**
-
-- Vendor-confirmed API contract and representative test device/site exist.
-- First boot, duplicate/wrong device, interrupted provisioning, replacement/factory reset, stale profile, AAA reject, timeout/retry, suspend/restore and rollback are exercised in a controlled test environment.
-- Successful provisioning read-back maps to exactly one service and tenant; failed/unknown devices never become Active.
-- Replaying the same event cannot create duplicate network profiles or customer services.
 
 ### 3. Flutter main app product flows
 
@@ -83,8 +84,8 @@ Resume only after phases 1–3 have stable API contracts and role/capability nee
 | Layer | Repository evidence | Not complete |
 |---|---|---|
 | Frappe | Custom app source has ISP Acquisition Request, ISP Service Order, ISP Installation Job and reference-only ISP Integration Event DocTypes. Installation closeout validates assigned technician, device/check fields, and submits a reference-only outbox event. Gateway supports staff-only read projections for acquisition/service order. | App is not installed or packaged into a validated image; no customer self-care or technician closeout API, outbox dispatcher, payment integration, live NMS writer, full role review or production workflows. New source has not been build/runtime validated. |
-| NMS | `nmsprime/nmsprime` redirects to the official `cablelabs/os-provisioning` repository; the project pins commit `117cf48e917681c6c47ba966132c2fbf1e606f4b`. Official docs describe FTTH/DSL/WiFi provisioning via TR-069/RADIUS and a REST/JSON API at `/admin/api/v0`. Go integration source has bounded Frappe projections and minimal NMS contract-number/CPE-MAC lookups; a tenant-scoped staff BFF route exposes only a contract ID reference. | Deployed NMS Prime edition/release and its exact OpenAPI schema are not confirmed. The documented Basic Auth API includes a full-CRUD default API user and fine-grained API permissions are planned; connector isolation/security review is required. No active provisioning integration or controlled end-to-end test exists. |
-| Flutter main app | Single Android Flutter source tree, workspace/invitation admin, and ISP staff lookup screen now call typed BFF reads for Frappe acquisition/service-order projections and NMS contract references. | Customer self-care, technician installation list/closeout, write workflows and other product modules are incomplete; the current head has not been Android-built; auth itself remains unvalidated. |
+| NMS | `nmsprime/nmsprime` redirects to the official `cablelabs/os-provisioning` repository; the project pins commit `117cf48e917681c6c47ba966132c2fbf1e606f4b`. Official docs describe FTTH/DSL/WiFi provisioning via TR-069/RADIUS and a REST/JSON API at `/admin/api/v0`. Go integration source has bounded Frappe projections and minimal NMS contract-number/CPE-MAC lookups; a tenant-scoped staff BFF route exposes only a contract ID reference. | Deployed NMS Prime edition/release and its exact OpenAPI schema are not confirmed. Pinned source uses Basic Auth, a `use api` ability, and model-action checks on generated routes. Deployed user abilities and custom action protections still require operator verification; the adapter must remain allowlisted and read-only until then. No active provisioning integration or controlled end-to-end test exists. |
+| Flutter main app | Single Android Flutter source tree, workspace/invitation admin, and ISP staff lookup screen now call typed BFF reads for Frappe acquisition/service-order projections and NMS contract references. | Customer self-care, technician installation list and exact NMS modem-reference match are in source; customer self-care, closeout, provisioning writes and other product modules are incomplete; the current head has not been Android-built; auth itself remains unvalidated. |
 | Environment | Compose and preflight configuration are source-only. | No service was started and no legacy installer was executed; local component availability must be inspected in the target laptop VM. |
 
 ## Guardrails

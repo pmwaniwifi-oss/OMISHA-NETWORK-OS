@@ -167,6 +167,51 @@ func (api *operationsAPI) listMyInstallationJobs(w http.ResponseWriter, r *http.
 	writeAuthJSON(w, http.StatusOK, map[string]any{"installation_jobs": jobs})
 }
 
+func (api *operationsAPI) getInstallationJobNMSReference(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
+	defer cancel()
+	principal, _, err := api.authorizeISPStaff(ctx, r, "isp.technician")
+	if err != nil {
+		writeOperationsError(w, err)
+		return
+	}
+	name := r.PathValue("jobID")
+	if !operationDocumentName.MatchString(name) {
+		writeAuthJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid installation job reference"})
+		return
+	}
+	target, err := api.integrations.forOrganization(principal.OrganizationID.String)
+	if err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "operations integration unavailable"})
+		return
+	}
+	frappeUser, ok := target.frappeTechnicians[principal.IdentityID]
+	if !ok || frappeUser == "" {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "technician account mapping unavailable"})
+		return
+	}
+	job, err := target.frappe.AssignedInstallationJob(ctx, principal.OrganizationID.String, name, frappeUser)
+	if err != nil {
+		writeIntegrationError(w, err)
+		return
+	}
+	if job.ONTMAC == "" {
+		writeAuthJSON(w, http.StatusConflict, map[string]string{"error": "ONT WAN MAC is not recorded on this job"})
+		return
+	}
+	modemID, err := target.nms.ModemIDByMAC(ctx, principal.OrganizationID.String, job.ONTMAC)
+	if err != nil {
+		writeIntegrationError(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeAuthJSON(w, http.StatusOK, map[string]any{"nms_modem_reference": map[string]any{
+		"installation_job": job.Name,
+		"nms_modem_id": modemID,
+		"match_status": "exact_mac_match",
+	}})
+}
+
 func writeOperationsError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, context.DeadlineExceeded):
