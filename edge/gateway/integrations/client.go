@@ -17,6 +17,8 @@ import (
 
 var ErrTenant = errors.New("integration tenant mismatch")
 var ErrUpstream = errors.New("upstream request failed")
+var ErrNotFound = errors.New("integration record not found")
+var ErrAmbiguous = errors.New("integration record is ambiguous")
 var label = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
 var document = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9 ._-]{0,139}$`)
 var positiveID = regexp.MustCompile(`^[1-9][0-9]{0,18}$`)
@@ -96,4 +98,143 @@ func (c *Client) Customer(ctx context.Context, tenant, name string) (json.RawMes
 func (c *Client) Contract(ctx context.Context, tenant, id string) (json.RawMessage, error) {
     if c.kind != "nms" || !positiveID.MatchString(id) { return nil, errors.New("invalid contract request") }
     return c.read(ctx, tenant, "/admin/api/v0/Contract/"+id)
+}
+
+
+// AcquisitionProjection is a bounded workflow view from the owning Frappe site.
+// It intentionally excludes Lead/customer contact fields and financial payloads.
+type AcquisitionProjection struct {
+    Name string `json:"name"`
+    RequestedPlan string `json:"requested_plan"`
+    Status string `json:"acquisition_status"`
+    IdentityStatus string `json:"identity_status"`
+    PaymentRequest string `json:"payment_request"`
+    ServiceOrder string `json:"service_order"`
+}
+
+// Acquisition reads only fields required to render onboarding progress in the BFF.
+func (c *Client) Acquisition(ctx context.Context, tenant, name string) (AcquisitionProjection, error) {
+    var result AcquisitionProjection
+    if c.kind != "frappe" || !document.MatchString(name) {
+        return result, errors.New("invalid acquisition request")
+    }
+    fields, _ := json.Marshal([]string{
+        "name", "requested_plan", "acquisition_status", "identity_status",
+        "payment_request", "service_order",
+    })
+    query := url.Values{}
+    query.Set("fields", string(fields))
+    path := "/api/resource/ISP%20Acquisition%20Request/" + url.PathEscape(name) + "?" + query.Encode()
+    raw, err := c.read(ctx, tenant, path)
+    if err != nil {
+        return result, err
+    }
+    var envelope struct {
+        Data AcquisitionProjection `json:"data"`
+    }
+    if json.Unmarshal(raw, &envelope) != nil || envelope.Data.Name != name {
+        return result, ErrUpstream
+    }
+    return envelope.Data, nil
+}
+
+// ServiceOrder reads a limited operational projection from the client Frappe site.
+func (c *Client) ServiceOrder(ctx context.Context, tenant, name string) (map[string]json.RawMessage, error) {
+    if c.kind != "frappe" || !document.MatchString(name) {
+        return nil, errors.New("invalid service order request")
+    }
+    fields, _ := json.Marshal([]string{
+        "name", "requested_plan", "service_status", "external_service_id",
+        "failure_summary", "requested_at",
+    })
+    query := url.Values{}
+    query.Set("fields", string(fields))
+    raw, err := c.read(ctx, tenant, "/api/resource/ISP%20Service%20Order/"+url.PathEscape(name)+"?"+query.Encode())
+    if err != nil {
+        return nil, err
+    }
+    var envelope struct {
+        Data map[string]json.RawMessage `json:"data"`
+    }
+    if json.Unmarshal(raw, &envelope) != nil || envelope.Data == nil || string(envelope.Data["name"]) != `"`+name+`"` {
+        return nil, ErrUpstream
+    }
+    return envelope.Data, nil
+}
+
+type nmsObjectReference struct {
+    ID int64 `json:"id"`
+    Number string `json:"number"`
+    MAC string `json:"mac"`
+    ContractID int64 `json:"contract_id"`
+}
+
+// ContractIDByNumber uses NMS Prime's documented Contract filter. More than one
+// match fails closed. It returns only an internal object reference, not PII.
+func (c *Client) ContractIDByNumber(ctx context.Context, tenant, number string) (int64, error) {
+    if c.kind != "nms" || !label.MatchString(number) {
+        return 0, errors.New("invalid NMS contract lookup")
+    }
+    query := url.Values{}
+    query.Set("number", number)
+    raw, err := c.read(ctx, tenant, "/admin/api/v0/Contract?"+query.Encode())
+    if err != nil {
+        return 0, err
+    }
+    var envelope struct {
+        Models map[string]nmsObjectReference `json:"models"`
+    }
+    if json.Unmarshal(raw, &envelope) != nil {
+        return 0, ErrUpstream
+    }
+    var match *nmsObjectReference
+    for _, item := range envelope.Models {
+        if item.Number != number {
+            continue
+        }
+        if match != nil || item.ID <= 0 {
+            return 0, ErrAmbiguous
+        }
+        copy := item
+        match = &copy
+    }
+    if match == nil {
+        return 0, ErrNotFound
+    }
+    return match.ID, nil
+}
+
+// ModemIDByMAC finds one modem/CPE by its exact MAC and returns only its ID.
+// It is a lookup, not proof of ownership or authorization for a user request.
+func (c *Client) ModemIDByMAC(ctx context.Context, tenant, mac string) (int64, error) {
+    if c.kind != "nms" || !regexp.MustCompile(`(?i)^([0-9a-f]{2}:){5}[0-9a-f]{2}$`).MatchString(mac) {
+        return 0, errors.New("invalid NMS modem lookup")
+    }
+    query := url.Values{}
+    query.Set("mac", mac)
+    raw, err := c.read(ctx, tenant, "/admin/api/v0/Modem?"+query.Encode())
+    if err != nil {
+        return 0, err
+    }
+    var envelope struct {
+        Models map[string]nmsObjectReference `json:"models"`
+    }
+    if json.Unmarshal(raw, &envelope) != nil {
+        return 0, ErrUpstream
+    }
+    var match *nmsObjectReference
+    for _, item := range envelope.Models {
+        if !strings.EqualFold(item.MAC, mac) {
+            continue
+        }
+        if match != nil || item.ID <= 0 {
+            return 0, ErrAmbiguous
+        }
+        copy := item
+        match = &copy
+    }
+    if match == nil {
+        return 0, ErrNotFound
+    }
+    return match.ID, nil
 }
