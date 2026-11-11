@@ -245,7 +245,6 @@ class _OmishaAppState extends State<OmishaApp> {
     setState(() {
       _identityToken = null;
       _contexts = const [];
-      _challengeId = null;
       _error = null;
     });
   }
