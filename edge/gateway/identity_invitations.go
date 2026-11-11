@@ -37,7 +37,7 @@ type invitationRow struct {
 	RedeemedMembershipID sql.NullString
 }
 
-func (api *googleIdentityAPI) createISPAndOwnerInvitation(w http.ResponseWriter, r *http.Request) {
+func (api *googleIdentityAPI) createISPAndOwnerInvitation(w http.ResponseWriter, r *http.Request) {\n\tif !api.invitationServiceReady(w, r) { return }
 	var body createISPRequest
 	if err := decodeStrictJSON(w, r, &body, 4096); err != nil || strings.TrimSpace(body.DisplayLabel) == "" || len([]rune(strings.TrimSpace(body.DisplayLabel))) > 120 {
 		writeAuthJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid ISP registration request"})
@@ -89,7 +89,7 @@ func (api *googleIdentityAPI) createISPAndOwnerInvitation(w http.ResponseWriter,
 	writeInvitationResponse(w, invite, token)
 }
 
-func (api *googleIdentityAPI) createWorkspaceInvitation(w http.ResponseWriter, r *http.Request) {
+func (api *googleIdentityAPI) createWorkspaceInvitation(w http.ResponseWriter, r *http.Request) {\n\tif !api.invitationServiceReady(w, r) { return }
 	var body invitationRequest
 	if err := decodeStrictJSON(w, r, &body, 4096); err != nil || !validRoleCode(body.RoleCode) {
 		writeAuthJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid invitation request"})
@@ -134,7 +134,7 @@ func (api *googleIdentityAPI) createWorkspaceInvitation(w http.ResponseWriter, r
 	writeInvitationResponse(w, invite, token)
 }
 
-func (api *googleIdentityAPI) redeemInvitation(w http.ResponseWriter, r *http.Request) {
+func (api *googleIdentityAPI) redeemInvitation(w http.ResponseWriter, r *http.Request) {\n\tif !api.invitationServiceReady(w, r) { return }
 	var body struct {
 		Token string `json:"invitation_token"`
 	}
@@ -251,12 +251,17 @@ func (api *googleIdentityAPI) redeemInvitation(w http.ResponseWriter, r *http.Re
 		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation could not be accepted"})
 		return
 	}
-	_, err = tx.ExecContext(ctx,
+	result, err := tx.ExecContext(ctx,
 		`UPDATE account_invitations SET status = 'redeemed', redeemed_by_identity_id = $2,
 		        redeemed_membership_id = $3, redeemed_at = now()
 		 WHERE invitation_id = $1 AND status = 'pending' AND expires_at > now()`,
 		invite.ID, principal.IdentityID, membershipID)
 	if err != nil {
+		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "invitation could not be accepted"})
+		return
+	}
+	changed, err := result.RowsAffected()
+	if err != nil || changed != 1 {
 		writeAuthJSON(w, http.StatusGone, map[string]string{"error": "invitation is unavailable"})
 		return
 	}
@@ -278,9 +283,10 @@ func (api *googleIdentityAPI) redeemInvitation(w http.ResponseWriter, r *http.Re
 
 func (api *googleIdentityAPI) insertInvitation(ctx context.Context, tx *sql.Tx, issuer sessionPrincipal, organizationID, roleCode string, lifetime time.Duration) (invitationRow, string, error) {
 	var invite invitationRow
-	invite.ID, _ = randomUUID()
-	if invite.ID == "" {
-		return invite, "", errors.New("invitation id generation failed")
+	var err error
+	invite.ID, err = randomUUID()
+	if err != nil {
+		return invite, "", err
 	}
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
