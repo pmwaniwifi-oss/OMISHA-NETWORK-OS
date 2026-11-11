@@ -528,7 +528,7 @@ The customer web portal and any future staff web portal use the same server auth
 5. Add OMISHA workforce modules only after assignment-scoped support and audited break-glass controls exist.
 6. Verify with cross-tenant access tests, role-escalation tests, revoked-session tests, device-cache clearing tests and offline-draft expiry tests before pilot.
 
-**Implementation status:** the repository has a Flutter app shell whose only sign-in UI is Google, plus Go Google challenge/token and approved-context/session routes. The enrollment invitations, invitation-redeem endpoints, OMISHA/ISP admin provisioning, customer self-care/payment workflow and Aadhaar offline verifier are design requirements only. No production account creation or business workflow is available until these are implemented, legally reviewed and integration-tested.
+**Implementation status:** the repository has a Flutter app shell whose only sign-in UI is Google, plus Go Google challenge/token and approved-context/session routes. Invitation records and Go create/redeem routes now exist in source, but admin screens, deep-link/share delivery, initial OMISHA-admin bootstrap, customer self-care/payment and Aadhaar offline verifier remain design requirements. No production enrollment or business workflow is available until these are implemented, legally reviewed and integration-tested.
 
 
 ## 15. Social sign-in and OMISHA entertainment monetization
@@ -562,12 +562,12 @@ The client callback is not authoritative for awarding valuable rewards. For rewa
 5. Add AdMob using test IDs only, then test ad callbacks and server-side verification. Move to production ad units only after store/privacy policy and publisher account review.
 6. Measure ad fill, valid impressions, completion, reward fraud, user retention and revenue net of hosting/content costs before scaling.
 
-**Implementation status:** the Flutter shell offers Google as its only sign-in method. Go Google challenge/token exchange and approved-context/session routes exist in source, but invitation create/redeem APIs, membership provisioning, OAuth project configuration, customer self-care/payment, Aadhaar offline verification, AdMob SDK, video/game catalog and monetization ledger are not implemented or live.
+**Implementation status:** the Flutter shell offers Google as its only sign-in method. Go Google challenge/token exchange, approved-context/session routes and invitation create/redeem APIs exist in source. App deep-link/share UI, initial OMISHA-admin bootstrap, OAuth project configuration, customer self-care/payment, Aadhaar offline verification, AdMob SDK, video/game catalog and monetization ledger are not implemented or live.
 
 
 ## 16. Identity and membership control plane
 
-The Go gateway now has Google challenge/token exchange and approved-context/session routes in source, backed by an identity-only membership directory. It does not yet create or redeem invitations, provision memberships, or authorize business APIs. Do not issue roles from the Flutter client, and do not use Valkey as the identity database.
+The Go gateway now has Google challenge/token exchange, approved-context/session routes and invitation create/redeem routes in source, backed by an identity-only directory. The routes do not provide the missing initial OMISHA-admin bootstrap, customer self-care/payment path, tenant routing or business authorization. Do not issue roles from the Flutter client, and do not use Valkey as the identity database.
 
 ### Minimal identity-only store
 
@@ -583,7 +583,7 @@ The control-plane schema should contain only:
 - short-lived session token digests, context scope, expiry and revocation state;
 - server-issued authentication challenge nonce fingerprints and minimal security audit events.
 
-The database must not copy ERPNext Customer/Lead profiles. Customer identity links to the tenant's Lead/Customer record only when the acquisition workflow assigns that tenant. Staff and ISP roles are created by invitation/approval; a Google account by itself grants no staff role. A new customer identity may receive only a restricted onboarding context that can submit a service request; service/tenant access is granted after the serviceability and registration process.
+The database must not copy ERPNext Customer/Lead profiles. Customer identity links to the tenant's Lead/Customer record only when the acquisition workflow assigns that tenant. Staff and ISP roles are created by invitation/approval; a Google account by itself grants no staff role. An invited ISP customer receives a pending membership only; it has no active workspace context until the verification/payment onboarding process approves it. The self-care path and activation transition remain to be implemented.
 
 ### Token and tenant rules
 
@@ -598,4 +598,4 @@ The database must not copy ERPNext Customer/Lead profiles. Customer identity lin
 
 The identity database must run as its own internal-only container with an encrypted volume, separate credentials, backup/restore policy and migrations. It must not be exposed on the laptop/cloud host's public ports. The Go gateway is the only normal application client. This control-plane store is an intentional small directory; it avoids copying business data while enabling one account to hold explicit memberships across multiple ISP tenants and OMISHA workspaces.
 
-**Current status:** the repository contains identity-only PostgreSQL migrations, a composite scope foreign key, a Compose overlay, a retry-aware migration helper, and Go endpoints for Google challenge/token exchange, approved membership listing, context activation/current-context lookup and session-family logout. Identity exchange validates the provider token, consumes the challenge, maps a pseudonymous subject and stores HMAC digests of short-lived sessions. These changes have not been build/integration validated or applied to a running database. Migration 0004 now defines HMAC-only invitation storage, but invitation create/redeem APIs and OMISHA-to-ISP/ISP-to-staff/customer provisioning remain unimplemented. Customer self-care/payment, Aadhaar offline verification, tenant routing and business authorization also remain unimplemented. Google sign-in alone creates no business access.
+**Current status:** the repository contains identity-only PostgreSQL migrations, a composite scope foreign key, a Compose overlay, a retry-aware migration helper, and Go endpoints for Google challenge/token exchange, approved membership listing, context activation/current-context lookup and session-family logout. Identity exchange validates the provider token, consumes the challenge, maps a pseudonymous subject and stores HMAC digests of short-lived sessions. These changes have not been build/integration validated or applied to a running database. Migration 0004 defines HMAC-only invitation storage and Go source now includes issuer-scoped invitation creation/redemption and OMISHA ISP creation. These routes have not been build/integration validated. App deep-link/share and notification delivery, initial OMISHA-admin bootstrap, self-care/payment, Aadhaar offline verification, tenant routing and business authorization remain unimplemented. Google sign-in alone creates no business access.
