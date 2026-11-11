@@ -61,6 +61,9 @@ func handlerWithPing(ping func(context.Context) error) http.Handler {
 	mux.HandleFunc("POST /v1/me/contexts/activate", googleIdentity.activateMyContext)
 	mux.HandleFunc("GET /v1/me", googleIdentity.currentContext)
 	mux.HandleFunc("POST /v1/auth/logout", googleIdentity.logoutSessionFamily)
+	mux.HandleFunc("POST /v1/omisha/isps", googleIdentity.createISPAndOwnerInvitation)
+	mux.HandleFunc("POST /v1/me/invitations", googleIdentity.createWorkspaceInvitation)
+	mux.HandleFunc("POST /v1/auth/invitations/redeem", googleIdentity.redeemInvitation)
 	mux.HandleFunc("/v1/", func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "customer API is not implemented", http.StatusNotImplemented)
 	})
