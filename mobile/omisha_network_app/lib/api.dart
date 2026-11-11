@@ -127,7 +127,7 @@ class OmishaApi {
       body: {'identifier': identifier.trim()},
     );
     final challengeId = response['challenge_id'];
-    if (challengeId is! String || challengeId.isEmpty || challengeId.length > 200) {
+    if (challengeId is! String || challengeId.isEmpty || challengeId.length > 200 || nonce.length < 32 || nonce.length > 256) {
       throw const ApiException('The sign-in service returned an invalid response.');
     }
     return challengeId;
@@ -165,6 +165,7 @@ class OmishaApi {
   Future<String> exchangeGoogleIdToken({
     required String googleIdToken,
     required String challengeId,
+    required String nonce,
   }) async {
     if (googleIdToken.length < 24 || googleIdToken.length > 8192 ||
         challengeId.isEmpty || challengeId.length > 200) {
@@ -173,7 +174,7 @@ class OmishaApi {
     final response = await _send(
       'POST',
       'v1/auth/social/google',
-      body: {'challenge_id': challengeId, 'id_token': googleIdToken},
+      body: {'challenge_id': challengeId, 'nonce': nonce, 'id_token': googleIdToken},
     );
     final identityToken = response['identity_token'];
     if (identityToken is! String ||
