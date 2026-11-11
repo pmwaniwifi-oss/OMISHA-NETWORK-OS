@@ -259,6 +259,15 @@ func decodeGoogleExchangeRequest(w http.ResponseWriter, r *http.Request) (google
 }
 
 func resolveGoogleIdentity(ctx context.Context, tx *sql.Tx, subjectHMAC []byte) (string, string, error) {
+	// Serialize first-time links for one provider subject. This avoids creating an orphan
+	// identity during simultaneous first logins and keeps DELETE out of the runtime grant set.
+	var lockAcquired any
+	if err := tx.QueryRowContext(ctx,
+		`SELECT pg_advisory_xact_lock(hashtextextended(encode($1::bytea, 'hex'), 0))`,
+		subjectHMAC).Scan(&lockAcquired); err != nil {
+		return "", "", err
+	}
+
 	var identityID, status string
 	err := tx.QueryRowContext(ctx,
 		`SELECT i.identity_id::text, i.status
@@ -273,36 +282,21 @@ func resolveGoogleIdentity(ctx context.Context, tx *sql.Tx, subjectHMAC []byte) 
 		return "", "", err
 	}
 
-	candidateID, err := randomUUID()
+	identityID, err = randomUUID()
 	if err != nil {
 		return "", "", err
 	}
 	if _, err = tx.ExecContext(ctx,
-		`INSERT INTO identities (identity_id, status) VALUES ($1, 'active')`, candidateID); err != nil {
+		`INSERT INTO identities (identity_id, status) VALUES ($1, 'active')`, identityID); err != nil {
 		return "", "", err
 	}
-	err = tx.QueryRowContext(ctx,
+	if _, err = tx.ExecContext(ctx,
 		`INSERT INTO external_identities (provider, subject_hmac, identity_id, verified_at)
-		 VALUES ('google', $1, $2, now())
-		 ON CONFLICT (provider, subject_hmac) DO NOTHING
-		 RETURNING identity_id::text`,
-		subjectHMAC, candidateID).Scan(&identityID)
-	if err == nil {
-		return identityID, "active", nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
+		 VALUES ('google', $1, $2, now())`,
+		subjectHMAC, identityID); err != nil {
 		return "", "", err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM identities WHERE identity_id = $1`, candidateID); err != nil {
-		return "", "", err
-	}
-	err = tx.QueryRowContext(ctx,
-		`SELECT i.identity_id::text, i.status
-		 FROM external_identities e
-		 JOIN identities i ON i.identity_id = e.identity_id
-		 WHERE e.provider = 'google' AND e.subject_hmac = $1`,
-		subjectHMAC).Scan(&identityID, &status)
-	return identityID, status, err
+	return identityID, "active", nil
 }
 
 func insertSecurityAudit(ctx context.Context, tx *sql.Tx, identityID, event, outcome string) error {
