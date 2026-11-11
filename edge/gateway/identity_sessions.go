@@ -122,7 +122,7 @@ func (api *googleIdentityAPI) activateMyContext(w http.ResponseWriter, r *http.R
 		return
 	}
 	raw := make([]byte, 32)
-	if _, err := cryptoRandomRead(raw); err != nil {
+	if _, err := rand.Read(raw); err != nil {
 		writeAuthJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "account activation unavailable"})
 		return
 	}
