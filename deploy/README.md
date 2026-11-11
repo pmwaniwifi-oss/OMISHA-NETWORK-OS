@@ -1,5 +1,7 @@
 # OMISHA platform integration baseline
 
+Database separation rules and scale tradeoffs: [database isolation](database-isolation.md).
+
 ## Git-managed sources
 
 `upstream/` contains four Git submodules at reviewed commits, recorded in
