@@ -45,7 +45,7 @@ PaymentConfirmed is not a client-supplied field and does not itself activate ser
 
 Do not treat an end-customer's broadband credentials as credentials for the ISP router's administrative interface. In a common PPPoE design, the customer configures WAN PPPoE credentials in their ONT/router; the access concentrator/BNG forwards authentication to a RADIUS/AAA service, which checks the subscriber profile and returns allowed policy. IPoE/DHCP with a defined AAA mechanism is another possible design. The exact access method, BNG/OLT/ONT vendors and profile attributes must be confirmed. If by “login to ISP router” the user means accessing a managed router's admin console, that is a separate privileged operation and must not use subscriber credentials.
 
-NMS Prime may orchestrate service/device provisioning only if the installed product/version supports the needed API and repeat-safe operations. TR-069/ACS or TR-369/USP manages a compatible ONT/router; BNG/NAS plus RADIUS/AAA (or the selected IPoE equivalent) authorizes subscriber traffic. These are separate control functions even if one vendor platform integrates them. The exact NMS Prime product is not yet identified, so the architecture keeps separate contracts and does not claim that NMS Prime itself authenticates the ONT. Until the NMS, OLT, CPE, ACS/USP, and access/AAA interfaces are verified, keep provisioning pending/manual review.
+The official NMS Prime Community Edition source documents FTTH/DSL/WiFi provisioning via TR-069 and RADIUS, CPE/modem management, and BNG/BRAS/IP-pool/QoS operations. Its official REST/JSON API documentation lists `/admin/api/v0/{Object}` routes. This supports the intended zero-touch design direction, but the customer's installed edition/release, ONT models, API schema and actual OLT/BNG/ACS/AAA topology still need confirmation. TR-369/USP is not claimed as supported by the pinned NMS Prime release. Treat TR-069 CPE management and subscriber access authorization via BNG/RADIUS as distinct functions. Until host API schemas and repeat-safe effects are verified, keep provisioning pending/manual review.
 
 Identity method is independently policy-gated. Aadhaar offline/e-KYC remains disabled unless the operator has confirmed eligibility, a compliant provider/process, and approved configuration. Store only a minimal verification result/reference; never upload/store the source Aadhaar artifact, QR/XML, biometrics, or OTP in this app.
 
@@ -138,7 +138,7 @@ References:
 
 ## Automatic ONT/router registration (customer does nothing)
 
-“TR2” has not been identified precisely. This design records the intended behavior as automatic ONT/router onboarding and supports a standards-based adapter for TR-069/CWMP or TR-369/USP after the exact device and controller are confirmed. If “TR2” means a vendor-specific product/protocol, the operator must provide its product/model and interface contract before implementation.
+“TR2” likely refers to TR-069, which the official NMS Prime Community Edition documentation lists for FTTH/DSL/WiFi CPE provisioning. The project source is pinned to `cablelabs/os-provisioning` commit `117cf48e917681c6c47ba966132c2fbf1e606f4b`; confirm the deployed edition/release, ONT model and ACS support before implementation. TR-369 support is not inferred from this repository.
 
 - Technician scans/records ONT/router model and device identifiers against the installation job; server checks they are expected for that service and network location.
 - ONT authentication/registration to the access network and router management check-in are separate proofs. The access network uses the operator's OLT/ONT registration method; the management plane uses the device's supported ACS/USP trust/bootstrap method.
@@ -147,6 +147,11 @@ References:
 - A failed, unknown, duplicated, replaced, or factory-reset device remains Pending/Manual Review. Never auto-attach an unknown device to a customer using serial number alone.
 - Device management credentials/certificates and subscriber credentials are different secrets. Keep them encrypted and scoped, redact them from logs, rotate/revoke on replacement or compromise, and never expose ACS/USP credentials to customers.
 - Release acceptance requires the exact ONT/router models and access topology in a lab or controlled pilot, including first boot, duplicate serial, wrong service, interrupted check-in, reset/replacement, configuration mismatch, AAA rejection, and retry/recovery.
+
+NMS Prime references:
+- Official project source (the old `nmsprime/nmsprime` repository says it moved here): https://github.com/cablelabs/os-provisioning
+- Official NMS Prime API documentation: REST/JSON, `/admin/api/v0/{Object}`, HTTP Basic Auth; documented default `api@localhost` user can create/modify/delete all objects, and fine-grained API permissions are described as planned: https://nmsprime.atlassian.net/wiki/spaces/NMS/pages/8522192/NMS+Prime+API
+- Official OS Provisioning overview: CPE/modem online workflow, TR-069/ACS diagnostics, BNG/BRAS/IP pools/QoS, and RADIUS-based FTTH speed enforcement: https://nmsprime.atlassian.net/wiki/spaces/NMS/pages/1097072648/Overview+OS+Provisioning
 
 Broadband Forum references:
 - TR-069/CWMP defines CPE-to-ACS secure auto-configuration and dynamic service provisioning: https://www.broadband-forum.org/pdfs/tr-069-1-6-0.pdf
