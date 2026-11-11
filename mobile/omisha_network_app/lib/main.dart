@@ -5,6 +5,7 @@ import 'api.dart';
 
 const _apiBaseUrl = String.fromEnvironment('OMISHA_API_BASE_URL');
 const _sessionKey = 'omisha.scoped_access_token';
+const _identitySessionKey = 'omisha.identity_session_token';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -48,8 +49,12 @@ class _OmishaAppState extends State<OmishaApp> {
     }
     try {
       final token = await _secureStorage.read(key: _sessionKey);
-      if (token != null && token.isNotEmpty) {
-        final restored = await _api!.resumeSession(token);
+      final identityToken = await _secureStorage.read(key: _identitySessionKey);
+      if (token != null && token.isNotEmpty && identityToken != null && identityToken.isNotEmpty) {
+        final restored = await _api!.resumeSession(
+          accessToken: token,
+          identityToken: identityToken,
+        );
         if (!mounted) return;
         setState(() {
           _session = restored;
@@ -60,6 +65,8 @@ class _OmishaAppState extends State<OmishaApp> {
     } on ApiException catch (exception) {
       if (exception.statusCode == 401) {
         await _secureStorage.delete(key: _sessionKey);
+      await _secureStorage.delete(key: _identitySessionKey);
+        await _secureStorage.delete(key: _identitySessionKey);
       }
       _error = exception.message;
     } catch (_) {
@@ -144,6 +151,7 @@ class _OmishaAppState extends State<OmishaApp> {
         context: context,
       );
       await _secureStorage.write(key: _sessionKey, value: session.accessToken);
+      await _secureStorage.write(key: _identitySessionKey, value: session.identityToken);
       if (!mounted) return;
       setState(() {
         _session = session;
@@ -169,7 +177,7 @@ class _OmishaAppState extends State<OmishaApp> {
       _error = null;
     });
     try {
-      final contexts = await _api!.listContexts(session.accessToken);
+      final contexts = await _api!.listContexts(session.identityToken);
       if (!mounted) return;
       if (contexts.isEmpty) {
         throw const ApiException('No active account access is assigned to this sign-in.');
@@ -196,7 +204,10 @@ class _OmishaAppState extends State<OmishaApp> {
     });
     try {
       if (token != null && _api != null) {
-        await _api!.logout(token);
+        await _api!.logout(
+          accessToken: token,
+          identityToken: _session!.identityToken,
+        );
       }
     } catch (_) {
       // Always clear local credentials; revocation is retried/handled server-side.
