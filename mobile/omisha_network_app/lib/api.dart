@@ -127,7 +127,7 @@ class OmishaApi {
       body: {'identifier': identifier.trim()},
     );
     final challengeId = response['challenge_id'];
-    if (challengeId is! String || challengeId.isEmpty || challengeId.length > 200 || nonce.length < 32 || nonce.length > 256) {
+    if (challengeId is! String || challengeId.isEmpty || challengeId.length > 200) {
       throw const ApiException('The sign-in service returned an invalid response.');
     }
     return challengeId;
