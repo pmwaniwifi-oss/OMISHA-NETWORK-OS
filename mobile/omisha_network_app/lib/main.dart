@@ -450,6 +450,21 @@ class _OmishaAppState extends State<OmishaApp> {
     }
   }
 
+  Future<void> _openOperations() async {
+    final api = _api;
+    final session = _session;
+    if (api == null || session == null) return;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => _OperationsLookupPage(
+          api: api,
+          accessToken: session.accessToken,
+          roles: session.context.roleLabels,
+        ),
+      ),
+    );
+  }
+
   Future<void> _openContextPicker() async {
     final session = _session;
     if (_api == null || session == null) return;
@@ -552,6 +567,11 @@ class _OmishaAppState extends State<OmishaApp> {
     );
   }
 
+  bool get _canOpenOperations {
+    final roles = _session?.context.roleLabels ?? const <String>[];
+    return roles.any(const {'isp.owner', 'isp.admin', 'isp.support'}.contains);
+  }
+
   bool get _canCreateInvitation {
     final roles = _session?.context.roleLabels ?? const <String>[];
     return roles.contains('omisha.platform_admin') ||
@@ -594,6 +614,7 @@ class _OmishaAppState extends State<OmishaApp> {
         onLogout: _logout,
         onCreateInvitation: _canCreateInvitation ? _createInvitation : null,
         onManageInvitations: _canCreateInvitation ? _openInvitationManagement : null,
+        onOpenOperations: _canOpenOperations ? _openOperations : null,
       );
     }
     return _SignInPage(
@@ -853,6 +874,7 @@ class _WorkspacePage extends StatelessWidget {
     required this.onLogout,
     required this.onCreateInvitation,
     required this.onManageInvitations,
+    required this.onOpenOperations,
   });
 
   final WorkspaceContext contextInfo;
@@ -861,6 +883,7 @@ class _WorkspacePage extends StatelessWidget {
   final VoidCallback onLogout;
   final VoidCallback? onCreateInvitation;
   final VoidCallback? onManageInvitations;
+  final VoidCallback? onOpenOperations;
 
   @override
   Widget build(BuildContext context) {
@@ -923,6 +946,17 @@ class _WorkspacePage extends StatelessWidget {
                 onPressed: onCreateInvitation,
                 icon: const Icon(Icons.person_add_alt_1),
                 label: const Text('Create invitation'),
+              ),
+            ),
+          ],
+          if (onOpenOperations != null) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: onOpenOperations,
+                icon: const Icon(Icons.settings_ethernet_outlined),
+                label: const Text('ISP service operations'),
               ),
             ),
           ],
@@ -993,6 +1027,159 @@ class _MessagePage extends StatelessWidget {
           ),
         ),
       );
+}
+
+
+class _OperationsLookupPage extends StatefulWidget {
+  const _OperationsLookupPage({
+    required this.api,
+    required this.accessToken,
+    required this.roles,
+  });
+
+  final OmishaApi api;
+  final String accessToken;
+  final List<String> roles;
+
+  @override
+  State<_OperationsLookupPage> createState() => _OperationsLookupPageState();
+}
+
+class _OperationsLookupPageState extends State<_OperationsLookupPage> {
+  final _reference = TextEditingController();
+  String _kind = 'acquisition';
+  String? _result;
+  String? _error;
+  bool _busy = false;
+
+  bool get _canReadNMS =>
+      widget.roles.contains('isp.owner') || widget.roles.contains('isp.admin');
+
+  @override
+  void dispose() {
+    _reference.dispose();
+    super.dispose();
+  }
+
+  Future<void> _lookup() async {
+    final reference = _reference.text.trim();
+    if (reference.isEmpty) {
+      setState(() => _error = 'Enter a record reference.');
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+      _result = null;
+    });
+    try {
+      if (_kind == 'acquisition') {
+        final item = await widget.api.getAcquisitionProgress(
+          accessToken: widget.accessToken,
+          acquisitionId: reference,
+        );
+        _result = 'Onboarding status: ${item.status}\n'
+            'Plan: ${item.plan}\nIdentity check: ${item.identityStatus}\n'
+            'Payment request: ${item.paymentRequest ?? 'Not created'}\n'
+            'Service order: ${item.serviceOrder ?? 'Not created'}';
+      } else if (_kind == 'service_order') {
+        final item = await widget.api.getServiceOrder(
+          accessToken: widget.accessToken,
+          serviceOrderId: reference,
+        );
+        _result = 'Service status: ${item.status}\nPlan: ${item.plan}\n'
+            'NMS service reference: ${item.externalServiceId ?? 'Not assigned'}';
+      } else {
+        final item = await widget.api.getNMSContractReference(
+          accessToken: widget.accessToken,
+          number: reference,
+        );
+        _result = 'NMS contract number: ${item.number}\n'
+            'NMS record ID: ${item.nmsId}';
+      }
+    } catch (exception) {
+      _error = exception is ApiException
+          ? exception.message
+          : 'The request could not be completed.';
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final options = <String, String>{
+      'acquisition': 'Customer onboarding',
+      'service_order': 'Service order',
+      if (_canReadNMS) 'nms_contract': 'NMS contract reference',
+    };
+    if (!options.containsKey(_kind)) _kind = options.keys.first;
+    return Scaffold(
+      appBar: AppBar(title: const Text('ISP service operations')),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
+            const Text(
+              'Staff lookup only. The server checks your active ISP role and tenant on every request.',
+            ),
+            const SizedBox(height: 16),
+            DropdownButtonFormField<String>(
+              value: _kind,
+              decoration: const InputDecoration(
+                labelText: 'Record type',
+                border: OutlineInputBorder(),
+              ),
+              items: options.entries
+                  .map((entry) => DropdownMenuItem(
+                        value: entry.key,
+                        child: Text(entry.value),
+                      ))
+                  .toList(growable: false),
+              onChanged: _busy
+                  ? null
+                  : (value) {
+                      if (value != null) setState(() => _kind = value);
+                    },
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _reference,
+              maxLength: _kind == 'nms_contract' ? 64 : 140,
+              autocorrect: false,
+              decoration: const InputDecoration(
+                labelText: 'Record reference',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 8),
+            FilledButton.icon(
+              onPressed: _busy ? null : _lookup,
+              icon: const Icon(Icons.search),
+              label: const Text('Look up'),
+            ),
+            if (_busy) ...[
+              const SizedBox(height: 16),
+              const LinearProgressIndicator(),
+            ],
+            if (_error != null) ...[
+              const SizedBox(height: 16),
+              _InlineError(_error!),
+            ],
+            if (_result != null) ...[
+              const SizedBox(height: 16),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: SelectableText(_result!),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _InlineError extends StatelessWidget {
