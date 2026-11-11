@@ -392,25 +392,38 @@ The diagram shows logical workloads, not a mandate to run every database in one 
 
 
 
-## 13. Customer acquisition and automated onboarding
+## 13. Account enrollment, customer acquisition and automated onboarding
 
-Customer acquisition has two entry channels and one shared workflow. A self-service customer and a technician-assisted customer must not create separate customer masters or bypass the same eligibility, identity, payment, approval, and provisioning state machine.
+All user categories use the same Google sign-in provider and the same Android app/web identity flow. Enrollment is role-specific: an approved administrator issues a server-recorded, expiring, single-use invitation, or an end customer starts self-service registration. Google authenticates the person; the invitation or completed customer onboarding determines which server-side membership may be created. No OTP/password login, role selection, or tenant selection supplied by the client is used.
+
+A single user identity can hold multiple memberships. ISP staff/customer access belongs to that ISP tenant; an OMISHA operator alone may create an ISP tenant and invite its initial owner/admin. An ISP admin can issue scoped links for that ISP's staff and customers. Customer self-service remains available through the public portal/app and is gated by verified payment and the applicable identity/serviceability policy. Every path converges on one customer/service-order state machine and one ERPNext customer/payment record.
+
+### Enrollment and invitation authority
+
+- **OMISHA operator/admin:** creates the ISP tenant record and sends its initial owner/admin invitation. The invitation is tenant-bound, role-bound, single-use, expiring and audited.
+- **ISP owner/admin:** after Google sign-in and authorized membership activation, creates invitation links for that ISP's staff and invited customers. Staff role, territory, expiry and scope are fixed in the server-side invitation record; the recipient cannot change them in the URL or app.
+- **End customer:** may use an ISP invitation link or start independently in the customer self-care portal/app. A self-care customer completes Google sign-in, serviceability and the configured identity/consent steps, then pays through the approved hosted payment flow. The customer record/service onboarding is finalized only after the payment provider callback is verified and reconciled; no screenshot or browser redirect is proof of payment.
+- **Invite recipient:** opens the link, signs in with Google, and accepts the invitation. Verify any recipient binding and applicable offline identity proof before creating the membership. Consume the invitation atomically; retries return the same outcome and cannot create duplicate users/memberships.
+- **Aadhaar offline verification:** may be an enrollment verification step only after the ISP/operator has confirmed legal eligibility, exact UIDAI-supported method, consent text, alternatives, retention and any OVSE requirement. It is not a login provider. Store only the minimum verification result/reference, never the source Aadhaar artifact in ordinary app storage.
+- **Google login after enrollment:** customer, ISP and OMISHA users all use Google. A Google account alone never creates a tenant, staff role, paid customer or service entitlement. Account recovery, Google-account change and revoked invitations require an audited recovery path.
+
+Invitation tokens must be high entropy, stored as keyed digests, expiring, single-use and rate-limited. Put no tenant ID, role grant or Aadhaar data into a client-trusted token payload. The server loads the invitation record and rechecks issuer authority, tenant status, role limits, recipient binding and expiry at redemption.
 
 ### Channel A: customer self-registration
 
-1. Customer signs up on the branded web portal or Flutter customer app using verified mobile/email and chooses an available plan.
-2. The Go customer API checks serviceability for the requested address using the approved coverage source. It creates or resumes a single ERPNext Lead/Prospect using a channel idempotency key and duplicate-candidate checks. Similar phone/name matches are review candidates, not automatic merges. Aadhaar number is never the customer deduplication key.
-3. The portal explains the applicable identity process, purpose, fields, retention and alternatives in Hindi and English, obtains and records consent, and starts the operator-approved subscriber verification route.
+1. Customer opens the branded web portal or Flutter app, signs in with Google, selects a service plan and submits the installation/service address.
+2. The Go customer API checks serviceability using the approved coverage source. It creates or resumes one ERPNext Lead/Prospect using a channel idempotency key and duplicate-candidate checks. Similar phone/name matches are review candidates, not automatic merges. Aadhaar number is never the customer deduplication key.
+3. The portal explains the applicable identity process, purpose, fields, retention and alternatives in Hindi and English, records consent, and starts the operator-approved subscriber verification route. Google sign-in authenticates the account; it does not replace statutory subscriber verification.
 4. If Aadhaar offline verification is legally available for the operator and method, validate the supported digitally signed QR/e-Aadhaar/offline XML or other currently approved credential. Store the verification outcome, method, timestamp, consent receipt, verifier version, and minimal reference/masked attributes only. Do not persist the full Aadhaar number, raw QR payload, XML, share phrase, OTP, biometric, or full document image in normal application tables, logs, analytics or Git. Delete temporary artifacts after verification unless an explicit, lawful retention rule requires otherwise.
 5. If the customer chooses or needs an alternative, route to the configured accepted document/manual verification path. Do not make Aadhaar the only path unless the operator's legal/compliance owner confirms the exact basis and process.
 6. Customer pays through ERPNext's standard Payment Request and a configured hosted/approved gateway. ERPNext Payment Request/Payment Entry own the transaction reference, amount, currency, allocation and payment state. The Acquisition Request stores only a Link to its Payment Request, not a second payment record. Never collect/store card number, UPI PIN, CVV or payment credentials. A browser success redirect or screenshot is not payment proof.
 7. Payment webhook signature and amount/order match are verified server-side. The provider event ID and order idempotency key prevent duplicate payment posting. ERPNext owns the Sales Order/invoice/payment allocation; repeated webhook deliveries reconcile to the same transaction rather than create another entry.
 8. A common service order advances only when required identity checks, serviceability, terms, and payment/credit policy are satisfied. It then enters survey/installation or the configured no-install service path. Service activation waits for the approved network integration's acknowledgement and an end-to-end service test.
 
-### Channel B: technician-assisted registration
+### Channel B: ISP-admin/technician-assisted registration
 
-1. A technician signs in to the technician Flutter app or responsive portal with a separate workforce identity, MFA, assigned territory/role, and device/session controls.
-2. The technician creates or resumes the same ERPNext Lead/Prospect and service order through the same Go API. The source channel and assigned technician ID are audit metadata; customer, plan and identity records are not copied to a technician-only database.
+1. ISP staff sign in with Google and receive only their pre-approved ISP membership and assigned territory/role. The ISP admin generates customer or staff invitations from the admin workspace; a technician may help a customer use an authorized invitation/self-service link.
+2. The recipient follows the same Google sign-in and verification flow. The ISP/technician records the invite/source channel and assigned staff ID as audit metadata; staff cannot grant themselves roles or mark failed identity/payment checks as passed.
 3. Customer consent and verification use the same approved methods and requirements as self-service. A technician may assist with capture/verification only where the chosen method and operator policy permit it; the technician cannot mark a failed or absent check as verified.
 4. If connectivity is unavailable, the app may queue only a short-lived encrypted draft of non-sensitive order fields, with local access controls and explicit expiry. It must not queue raw Aadhaar files, biometrics, OTPs, payment secrets or identity payloads for later background sync. Identity proof and payment must be verified online or via a separately approved offline process before activation.
 5. Installation evidence is limited to the assigned order: equipment serial/MAC, checklist, completion timestamp, and customer acknowledgement. Location/photo collection is purpose-limited, consented where required, access-controlled and retention-bounded.
@@ -491,9 +504,10 @@ A person may have more than one legitimate membership (for example, a subscriber
 
 ### Sign-in and authorization
 
-- Customer self-registration uses the approved customer identity/phone verification flow. Staff cannot create or elevate a customer into ISP/OMISHA staff.
-- ISP staff accounts are invited/provisioned by that ISP's authorized administrator and require MFA; ISP organization ownership and admin recovery require a separately audited process.
-- OMISHA employee accounts use company identity/SSO with MFA. Platform-admin access is separately granted, time-bounded where practical, and audited.
+- All customer, ISP and OMISHA users use Google sign-in; there is no separate OTP/password login path. Google authenticates identity only.
+- ISP staff and ISP-invited customers receive an expiring, single-use, ISP-bound link generated by an authorized ISP admin. ISP tenant creation and initial ISP owner/admin invitation are OMISHA-admin-only.
+- OMISHA staff/admin memberships are provisioned by authorized OMISHA administrators. Platform-admin access is separately approved, time-bounded where practical, and audited.
+- An end customer may self-register without an invitation, but service onboarding is gated by serviceability, the applicable verification policy and a verified/reconciled payment event.
 - Use one stable user identity with explicit organization memberships and role assignments. A login is not a tenant, and a user can belong to multiple tenants only through verified membership records.
 - The Go API/BFF authenticates every request and checks role + organization membership + record assignment. The Flutter client only hides unavailable screens; it is never the security boundary.
 - Customer, ISP-staff and OMISHA-staff API scopes are separated. Customer endpoints enforce ownership. Technician endpoints enforce assignment/territory. Sales endpoints expose only assigned pipeline records. Finance endpoints cannot silently alter network state. OMISHA support access to ISP records is case-bound, minimized and audited.
@@ -514,18 +528,18 @@ The customer web portal and any future staff web portal use the same server auth
 5. Add OMISHA workforce modules only after assignment-scoped support and audited break-glass controls exist.
 6. Verify with cross-tenant access tests, role-escalation tests, revoked-session tests, device-cache clearing tests and offline-draft expiry tests before pilot.
 
-**Implementation status:** the repository now has an initial Flutter package shell with a login/context-selection UI and separate secure identity/context tokens. It is not a build-ready Android project: Flutter/Dart were unavailable in the inspected workspace, generated Android platform files are absent, and the Go authentication/membership endpoints are not implemented. The shell is not a usable login or production app yet.
+**Implementation status:** the repository has a Flutter app shell whose only sign-in UI is Google, plus Go Google challenge/token and approved-context/session routes. The enrollment invitations, invitation-redeem endpoints, OMISHA/ISP admin provisioning, customer self-care/payment workflow and Aadhaar offline verifier are design requirements only. No production account creation or business workflow is available until these are implemented, legally reviewed and integration-tested.
 
 
 ## 15. Social sign-in and OMISHA entertainment monetization
 
 ### Social identity is sign-in only
 
-Google Sign-In is the first social identity provider planned for the single Android app. A valid Google identity token proves a Google account sign-in; it does not create an ISP, technician, sales, finance, or OMISHA-admin role. The backend maps the provider's stable subject to an account, then loads only existing server-authorized memberships. New ISP/OMISHA staff require an invitation and approved membership. Customer registration remains subject to phone/contact and applicable subscriber verification.
+Google Sign-In is the sole sign-in provider selected for the single Android app in this release. A valid Google identity token proves a Google account sign-in; it does not create an ISP, technician, sales, finance, or OMISHA-admin role. The backend maps the provider's stable subject to an account, then loads only existing server-authorized memberships. An OMISHA admin invites the initial ISP owner/admin; an authorized ISP admin then invites that ISP's staff or customers. OMISHA admins invite OMISHA staff/admins. End customers can also self-register through self-care, with serviceability, applicable subscriber verification and confirmed payment before service onboarding completes. Google login is shared by all roles.
 
 The Flutter app sends a Google ID token to the Go API over HTTPS. The API validates signature using Google's rotating public keys, issuer, audience/client ID and expiry; it uses the provider subject as the stable external identity. Do not trust email/name from an unverified client body, auto-link existing accounts by an unverified email, or store a Google access token if the app only needs sign-in. Ask only for basic sign-in identity; no Gmail, Drive, YouTube or social-post scopes.
 
-Google OAuth client IDs and Android package/signing fingerprints must be created in OMISHA's Google Cloud identity project. A client ID is public configuration, not an app secret; client secrets and provider credentials never go in Flutter code or public Git. Google brand verification/consent-screen review and production app registration remain release requirements. Other providers (e.g. Meta) can be added behind the same identity-provider adapter after their own app registration/review and credentials are provided.
+Google OAuth client IDs and Android package/signing fingerprints must be created in OMISHA's Google Cloud identity project. A client ID is public configuration, not an app secret; client secrets and provider credentials never go in Flutter code or public Git. Google brand verification/consent-screen review and production app registration remain release requirements. Do not add a second provider or OTP/password fallback unless OMISHA explicitly changes this product decision.
 
 ### Customer games and short-video feed
 
