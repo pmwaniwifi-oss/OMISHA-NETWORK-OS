@@ -549,3 +549,38 @@ The client callback is not authoritative for awarding valuable rewards. For rewa
 6. Measure ad fill, valid impressions, completion, reward fraud, user retention and revenue net of hosting/content costs before scaling.
 
 **Implementation status:** the Flutter shell now has a Google sign-in option and an API exchange contract, but the Go identity endpoint, Google OAuth project/client IDs, authentication verification, AdMob SDK, video/game catalog and monetization ledger are not implemented. Social login and entertainment monetization are not live.
+
+
+## 16. Identity and membership control plane
+
+The existing Go gateway currently returns HTTP 501 for `/v1/*`; it has no authentication endpoint or durable membership source. Do not issue roles from the Flutter client, and do not use Valkey as the identity database.
+
+### Minimal identity-only store
+
+Add a separately networked PostgreSQL identity control-plane database for the OMISHA platform. This is an intentional identity directory, not a shared customer/business database. Every ISP tenant still keeps its own ERPNext, NMS, monitoring and operational database boundaries.
+
+The control-plane schema should contain only:
+
+- internal random identity UUID and active/suspended status;
+- provider key plus HMAC-protected external subject lookup (Google `sub`); no raw ID token, Aadhaar, provider access token, customer phone/address, billing data, or copied profile;
+- organization/tenant IDs and display labels needed to render authorized contexts;
+- explicit membership rows (identity, organization, role, status, assignment scope, inviter/approver and timestamps);
+- short-lived session token digests, context scope, expiry and revocation state;
+- one-time provider-token replay fingerprints and minimal security audit events.
+
+The database must not copy ERPNext Customer/Lead profiles. Customer identity links to the tenant's Lead/Customer record only when the acquisition workflow assigns that tenant. Staff and ISP roles are created by invitation/approval; a Google account by itself grants no staff role. A new customer identity may receive only a restricted onboarding context that can submit a service request; service/tenant access is granted after the serviceability and registration process.
+
+### Token and tenant rules
+
+1. Go validates Google ID token signature, issuer, audience, expiry and subject against Google's current signing keys and OMISHA's configured client ID. Consume the token once using a keyed token fingerprint to reject replay. Never accept a client-provided role or tenant.
+2. A short-lived identity token may list only that user's membership contexts and create an onboarding request. It cannot read subscriber/customer data.
+3. Context activation accepts only a context ID returned by the server and rechecks the live membership row. It returns a short-lived context-scoped access token.
+4. Business endpoints require the scoped token and verify membership plus record ownership/assignment on every call. Tenant DB host/schema credentials are resolved from server-side tenant configuration, never from a request parameter.
+5. Revocation, account suspension, membership removal, or lost device invalidates active token families. Identity tokens and access tokens are stored as hashes in the directory; Valkey is limited to cache/rate limiting and may be flushed without losing accounts.
+6. Staff MFA, customer account recovery, invite expiry, login rate limits, suspicious-attempt controls, deletion/retention, and break-glass support access are server-side policies and audit events.
+
+### Deployment and implementation status
+
+The identity database must run as its own internal-only container with an encrypted volume, separate credentials, backup/restore policy and migrations. It must not be exposed on the laptop/cloud host's public ports. The Go gateway is the only normal application client. This control-plane store is an intentional small directory; it avoids copying business data while enabling one account to hold explicit memberships across multiple ISP tenants and OMISHA workspaces.
+
+**Current status:** no identity database/migrations, Google token verifier, login/session store, membership API, or tenant credential resolver exists yet. The Android shell and endpoint contract are not operational authentication. Build this control plane and authorization middleware before enabling Google/OTP login or opening customer/technician APIs.
