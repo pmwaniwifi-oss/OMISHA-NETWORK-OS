@@ -28,6 +28,7 @@ class _OmishaAppState extends State<OmishaApp> {
   String? _configurationError;
   String? _identityToken;
   String? _error;
+  bool _enrollmentPending = false;
   List<WorkspaceContext> _contexts = const [];
   ApiSession? _session;
   bool _busy = true;
@@ -121,6 +122,159 @@ class _OmishaAppState extends State<OmishaApp> {
     }
   }
 
+  Future<void> _redeemInvitationToken(String invitationToken) async {
+    final api = _api;
+    final identityToken = _identityToken;
+    if (api == null || identityToken == null) return;
+    final token = invitationToken.trim();
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final result = await api.redeemInvitation(
+        identityToken: identityToken,
+        invitationToken: token,
+      );
+      if (result['status'] == 'pending_onboarding') {
+        if (!mounted) return;
+        setState(() {
+          _enrollmentPending = true;
+          _busy = false;
+        });
+        return;
+      }
+      if (result['status'] != 'active') {
+        throw const ApiException('The invitation could not be accepted.');
+      }
+      final contexts = await api.listContexts(identityToken);
+      if (contexts.isEmpty) {
+        throw const ApiException('Invitation accepted, but no active workspace is available.');
+      }
+      if (!mounted) return;
+      setState(() {
+        _contexts = contexts;
+        _enrollmentPending = false;
+        _busy = false;
+      });
+      if (contexts.length == 1) {
+        await _activateContext(contexts.single);
+      }
+    } catch (exception) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = _safeMessage(exception);
+      });
+    }
+  }
+
+  Future<String?> _chooseInvitationRole(List<String> roles) {
+    return showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Create invitation'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final role in roles)
+              ListTile(
+                title: Text(role),
+                onTap: () => Navigator.of(dialogContext).pop(role),
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _createInvitation() async {
+    final api = _api;
+    final session = _session;
+    if (api == null || session == null) return;
+    final roles = session.context.roleLabels;
+    InvitationResult? invitation;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      if (session.context.workspace == 'omisha_workspace' &&
+          roles.contains('omisha.platform_admin')) {
+        final controller = TextEditingController();
+        final label = await showDialog<String>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Add ISP organization'),
+            content: TextField(
+              controller: controller,
+              autofocus: true,
+              maxLength: 120,
+              decoration: const InputDecoration(labelText: 'ISP / organization name'),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(controller.text.trim()),
+                child: const Text('Create ISP invite'),
+              ),
+            ],
+          ),
+        );
+        controller.dispose();
+        if (label == null || label.isEmpty) {
+          if (mounted) setState(() => _busy = false);
+          return;
+        }
+        invitation = await api.createISP(
+          accessToken: session.accessToken,
+          displayLabel: label,
+        );
+      } else {
+        final rolesToInvite = <String>[
+          if (roles.contains('isp.owner')) 'isp.admin',
+          'isp.technician',
+          'isp.sales',
+          'isp.support',
+          'isp.finance',
+          'isp.customer',
+        ];
+        final role = await _chooseInvitationRole(rolesToInvite);
+        if (role == null) {
+          if (mounted) setState(() => _busy = false);
+          return;
+        }
+        invitation = await api.createWorkspaceInvitation(
+          accessToken: session.accessToken,
+          roleCode: role,
+        );
+      }
+      final shareText = 'OMISHA NETWORK OS invitation\\n'
+          'Organization: ${invitation.organization}\\n'
+          'Role: ${invitation.roleCode}\\n'
+          'Expires: ${invitation.expiresAt}\\n\\n'
+          'Invitation token (keep private):\\n${invitation.token}\\n\\n'
+          'Open OMISHA NETWORK OS, sign in with Google, and enter this invitation token.';
+      await _googleIdentityChannel.invokeMethod<void>(
+        'shareInvitation',
+        {'text': shareText},
+      );
+    } catch (exception) {
+      if (mounted) setState(() => _error = _safeMessage(exception));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _finishIdentityAuthentication(String identityToken) async {
     final api = _api;
     if (api == null) {
@@ -132,15 +286,14 @@ class _OmishaAppState extends State<OmishaApp> {
     }
     try {
       final contexts = await api.listContexts(identityToken);
-      if (contexts.isEmpty) {
-        throw const ApiException('No active account access is assigned to this sign-in.');
-      }
       if (!mounted) return;
       setState(() {
         _identityToken = identityToken;
         _contexts = contexts;
+        _enrollmentPending = false;
         _busy = false;
       });
+      if (contexts.isEmpty) return;
       if (contexts.length == 1) {
         await _activateContext(contexts.single);
       }
@@ -235,6 +388,7 @@ class _OmishaAppState extends State<OmishaApp> {
       setState(() {
         _session = null;
         _identityToken = null;
+        _enrollmentPending = false;
         _contexts = const [];
           _busy = false;
       });
@@ -244,6 +398,7 @@ class _OmishaAppState extends State<OmishaApp> {
   void _cancelContextPicker() {
     setState(() {
       _identityToken = null;
+      _enrollmentPending = false;
       _contexts = const [];
       _error = null;
     });
@@ -282,6 +437,13 @@ class _OmishaAppState extends State<OmishaApp> {
     );
   }
 
+  bool get _canCreateInvitation {
+    final roles = _session?.context.roleLabels ?? const <String>[];
+    return roles.contains('omisha.platform_admin') ||
+        roles.contains('isp.owner') ||
+        roles.contains('isp.admin');
+  }
+
   Widget _buildHome() {
     if (_busy) return const _LoadingPage();
     if (_configurationError != null) {
@@ -292,6 +454,14 @@ class _OmishaAppState extends State<OmishaApp> {
       );
     }
     final session = _session;
+    if (_identityToken != null && _contexts.isEmpty) {
+      return _InvitationAcceptPage(
+        pending: _enrollmentPending,
+        error: _error,
+        onRedeem: _redeemInvitationToken,
+        onLogout: _logout,
+      );
+    }
     if (_contexts.isNotEmpty && _identityToken != null) {
       return _ContextPickerPage(
         contexts: _contexts,
@@ -307,6 +477,7 @@ class _OmishaAppState extends State<OmishaApp> {
         error: _error,
         onSwitch: _openContextPicker,
         onLogout: _logout,
+        onCreateInvitation: _canCreateInvitation ? _createInvitation : null,
       );
     }
     return _SignInPage(
