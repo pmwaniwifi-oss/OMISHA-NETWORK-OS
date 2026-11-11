@@ -37,7 +37,8 @@ type invitationRow struct {
 	RedeemedMembershipID sql.NullString
 }
 
-func (api *googleIdentityAPI) createISPAndOwnerInvitation(w http.ResponseWriter, r *http.Request) {\n\tif !api.invitationServiceReady(w, r) { return }
+func (api *googleIdentityAPI) createISPAndOwnerInvitation(w http.ResponseWriter, r *http.Request) {
+	if !api.invitationServiceReady(w, r) { return }
 	var body createISPRequest
 	if err := decodeStrictJSON(w, r, &body, 4096); err != nil || strings.TrimSpace(body.DisplayLabel) == "" || len([]rune(strings.TrimSpace(body.DisplayLabel))) > 120 {
 		writeAuthJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid ISP registration request"})
@@ -51,11 +52,6 @@ func (api *googleIdentityAPI) createISPAndOwnerInvitation(w http.ResponseWriter,
 		return
 	}
 	defer tx.Rollback()
-	requestID := r.Header.Get("Idempotency-Key")
-	if !challengeIDPattern.MatchString(requestID) {
-		writeAuthJSON(w, http.StatusBadRequest, map[string]string{"error": "a UUID v4 Idempotency-Key header is required"})
-		return
-	}
 	requestID := r.Header.Get("Idempotency-Key")
 	if !challengeIDPattern.MatchString(requestID) {
 		writeAuthJSON(w, http.StatusBadRequest, map[string]string{"error": "a UUID v4 Idempotency-Key header is required"})
@@ -103,7 +99,8 @@ func (api *googleIdentityAPI) createISPAndOwnerInvitation(w http.ResponseWriter,
 	writeInvitationResponse(w, invite, token)
 }
 
-func (api *googleIdentityAPI) createWorkspaceInvitation(w http.ResponseWriter, r *http.Request) {\n\tif !api.invitationServiceReady(w, r) { return }
+func (api *googleIdentityAPI) createWorkspaceInvitation(w http.ResponseWriter, r *http.Request) {
+	if !api.invitationServiceReady(w, r) { return }
 	var body invitationRequest
 	if err := decodeStrictJSON(w, r, &body, 4096); err != nil || !validRoleCode(body.RoleCode) {
 		writeAuthJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid invitation request"})
@@ -122,6 +119,11 @@ func (api *googleIdentityAPI) createWorkspaceInvitation(w http.ResponseWriter, r
 		return
 	}
 	defer tx.Rollback()
+	requestID := r.Header.Get("Idempotency-Key")
+	if !challengeIDPattern.MatchString(requestID) {
+		writeAuthJSON(w, http.StatusBadRequest, map[string]string{"error": "a UUID v4 Idempotency-Key header is required"})
+		return
+	}
 	principal, err := api.authenticateSessionTx(ctx, tx, r, "context")
 	if err != nil {
 		writeAuthJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
@@ -152,7 +154,8 @@ func (api *googleIdentityAPI) createWorkspaceInvitation(w http.ResponseWriter, r
 	writeInvitationResponse(w, invite, token)
 }
 
-func (api *googleIdentityAPI) redeemInvitation(w http.ResponseWriter, r *http.Request) {\n\tif !api.invitationServiceReady(w, r) { return }
+func (api *googleIdentityAPI) redeemInvitation(w http.ResponseWriter, r *http.Request) {
+	if !api.invitationServiceReady(w, r) { return }
 	var body struct {
 		Token string `json:"invitation_token"`
 	}
