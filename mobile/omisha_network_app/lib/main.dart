@@ -207,38 +207,63 @@ class _OmishaAppState extends State<OmishaApp> {
     try {
       if (session.context.workspace == 'omisha_workspace' &&
           roles.contains('omisha.platform_admin')) {
-        final controller = TextEditingController();
-        final label = await showDialog<String>(
+        final action = await showDialog<String>(
           context: context,
           builder: (dialogContext) => AlertDialog(
-            title: const Text('Add ISP organization'),
-            content: TextField(
-              controller: controller,
-              autofocus: true,
-              maxLength: 120,
-              decoration: const InputDecoration(labelText: 'ISP / organization name'),
+            title: const Text('OMISHA invitations'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  title: const Text('Add ISP organization'),
+                  subtitle: const Text('Create tenant and invite its first owner'),
+                  onTap: () => Navigator.of(dialogContext).pop('isp'),
+                ),
+                ListTile(
+                  title: const Text('Invite OMISHA staff'),
+                  onTap: () => Navigator.of(dialogContext).pop('staff'),
+                ),
+              ],
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(dialogContext).pop(controller.text.trim()),
-                child: const Text('Create ISP invite'),
-              ),
-            ],
           ),
         );
-        controller.dispose();
-        if (label == null || label.isEmpty) {
-          if (mounted) setState(() => _busy = false);
-          return;
+        if (action == null) return;
+        if (action == 'isp') {
+          final controller = TextEditingController();
+          final label = await showDialog<String>(
+            context: context,
+            builder: (dialogContext) => AlertDialog(
+              title: const Text('Add ISP organization'),
+              content: TextField(
+                controller: controller,
+                autofocus: true,
+                maxLength: 120,
+                decoration: const InputDecoration(labelText: 'ISP / organization name'),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(controller.text.trim()),
+                  child: const Text('Create ISP invite'),
+                ),
+              ],
+            ),
+          );
+          controller.dispose();
+          if (label == null || label.isEmpty) return;
+          invitation = await api.createISP(
+            accessToken: session.accessToken,
+            displayLabel: label,
+          );
+        } else {
+          invitation = await api.createWorkspaceInvitation(
+            accessToken: session.accessToken,
+            roleCode: 'omisha.staff',
+          );
         }
-        invitation = await api.createISP(
-          accessToken: session.accessToken,
-          displayLabel: label,
-        );
       } else {
         final rolesToInvite = <String>[
           if (roles.contains('isp.owner')) 'isp.admin',
@@ -602,6 +627,14 @@ class _InvitationAcceptPage extends StatefulWidget {
 
 class _InvitationAcceptPageState extends State<_InvitationAcceptPage> {
   final _tokenController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _tokenController.addListener(() {
+      if (mounted) setState(() {});
+    });
+  }
 
   @override
   void dispose() {
