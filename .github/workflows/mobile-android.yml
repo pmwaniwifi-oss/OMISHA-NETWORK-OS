@@ -1,0 +1,71 @@
+name: Android app shell build
+
+on:
+  pull_request:
+    paths:
+      - "mobile/omisha_network_app/**"
+      - ".github/workflows/mobile-android.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "mobile/omisha_network_app/**"
+      - ".github/workflows/mobile-android.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android-debug-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: mobile/omisha_network_app
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: "3.38.1"
+          cache: true
+          cache-key: flutter-3.38.1
+
+      - name: Generate Android host project
+        shell: bash
+        run: |
+          host_dir="$RUNNER_TEMP/omisha-android-host"
+          flutter create --platforms=android --org com.omisha --project-name omisha_network_app "$host_dir"
+          mkdir -p android
+          cp -a "$host_dir/android/." android/
+          perl -0pi -e 's/<application\b/<application android:allowBackup="false"/' android/app/src/main/AndroidManifest.xml
+
+      - name: Resolve Flutter dependencies
+        run: flutter pub get
+
+      - name: Analyze Dart source
+        run: flutter analyze --fatal-infos
+
+      - name: Build debug APK
+        run: >-
+          flutter build apk --debug
+          --dart-define=OMISHA_API_BASE_URL=https://api.example.invalid/
+          --dart-define=OMISHA_GOOGLE_SERVER_CLIENT_ID=
+
+      - name: Upload debug APK artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: omisha-network-os-android-debug
+          path: mobile/omisha_network_app/build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
