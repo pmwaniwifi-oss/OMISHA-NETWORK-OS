@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 class ApiException implements Exception {
   const ApiException(this.message, {this.statusCode});
@@ -58,6 +59,51 @@ class WorkspaceContext {
   factory WorkspaceContext.fromSessionJson(Map<String, dynamic> json) {
     return WorkspaceContext.fromJson(json);
   }
+}
+
+class InvitationResult {
+  const InvitationResult({
+    required this.id,
+    required this.organization,
+    required this.roleCode,
+    required this.token,
+    required this.expiresAt,
+  });
+
+  final String id;
+  final String organization;
+  final String roleCode;
+  final String token;
+  final String expiresAt;
+
+  factory InvitationResult.fromJson(Map<String, dynamic> json) {
+    final id = json['invitation_id'];
+    final organization = json['organization_name'];
+    final roleCode = json['role_code'];
+    final token = json['invitation_token'];
+    final expiresAt = json['expires_at'];
+    if (id is! String || organization is! String || roleCode is! String ||
+        token is! String || token.length < 40 || token.length > 128 ||
+        expiresAt is! String) {
+      throw const ApiException('The invitation response was invalid.');
+    }
+    return InvitationResult(
+      id: id,
+      organization: organization,
+      roleCode: roleCode,
+      token: token,
+      expiresAt: expiresAt,
+    );
+  }
+}
+
+String newIdempotencyKey() {
+  final random = Random.secure();
+  final bytes = List<int>.generate(16, (_) => random.nextInt(256));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  final hex = bytes.map((value) => value.toRadixString(16).padLeft(2, '0')).join();
+  return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
 }
 
 class GoogleAuthChallenge {
@@ -154,6 +200,47 @@ class OmishaApi {
     return identityToken;
   }
 
+  Future<InvitationResult> createISP({
+    required String accessToken,
+    required String displayLabel,
+  }) async {
+    final response = await _send(
+      'POST',
+      'v1/omisha/isps',
+      token: accessToken,
+      body: {'display_label': displayLabel},
+      extraHeaders: {'Idempotency-Key': newIdempotencyKey()},
+    );
+    return InvitationResult.fromJson(response);
+  }
+
+  Future<InvitationResult> createWorkspaceInvitation({
+    required String accessToken,
+    required String roleCode,
+    int expiresInHours = 72,
+  }) async {
+    final response = await _send(
+      'POST',
+      'v1/me/invitations',
+      token: accessToken,
+      body: {'role_code': roleCode, 'expires_in_hours': expiresInHours},
+      extraHeaders: {'Idempotency-Key': newIdempotencyKey()},
+    );
+    return InvitationResult.fromJson(response);
+  }
+
+  Future<Map<String, dynamic>> redeemInvitation({
+    required String identityToken,
+    required String invitationToken,
+  }) {
+    return _send(
+      'POST',
+      'v1/auth/invitations/redeem',
+      token: identityToken,
+      body: {'invitation_token': invitationToken},
+    );
+  }
+
   Future<List<WorkspaceContext>> listContexts(String identityToken) async {
     final response = await _send('GET', 'v1/me/contexts', token: identityToken);
     final values = response['contexts'];
@@ -206,6 +293,7 @@ class OmishaApi {
     String path, {
     String? token,
     Map<String, Object?>? body,
+    Map<String, String>? extraHeaders,
   }) async {
     final request = await _client.openUrl(method, _baseUri.resolve(path));
     request.followRedirects = false;
@@ -213,6 +301,7 @@ class OmishaApi {
     if (token != null) {
       request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
     }
+    extraHeaders?.forEach(request.headers.set);
     if (body != null) {
       request.headers.contentType = ContentType.json;
       request.add(utf8.encode(jsonEncode(body)));
