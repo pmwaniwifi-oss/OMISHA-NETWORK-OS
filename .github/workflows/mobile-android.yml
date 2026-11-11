@@ -66,14 +66,14 @@ jobs:
           else:
               raise SystemExit("Could not safely set Android minSdk to Credential Manager minimum (23)")
           dependencies = (
-              '    implementation("androidx.credentials:credentials:1.6.0")\\n'
-              '    implementation("androidx.credentials:credentials-play-services-auth:1.6.0")\\n'
-              '    implementation("com.google.android.libraries.identity.googleid:googleid:1.2.0")\\n'
+              '    implementation("androidx.credentials:credentials:1.6.0")\n'
+              '    implementation("androidx.credentials:credentials-play-services-auth:1.6.0")\n'
+              '    implementation("com.google.android.libraries.identity.googleid:googleid:1.2.0")\n'
           )
           if "androidx.credentials:credentials:1.6.0" not in source:
               if "dependencies {" not in source:
                   raise SystemExit("Generated Android app dependencies block was not found")
-              source = source.replace("dependencies {", "dependencies {\\n" + dependencies, 1)
+              source = source.replace("dependencies {", "dependencies {\n" + dependencies, 1)
           gradle_file.write_text(source)
           PY
 
