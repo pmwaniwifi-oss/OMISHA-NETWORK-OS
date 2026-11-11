@@ -55,7 +55,7 @@ func (api *operationsAPI) authorizeISPStaff(ctx context.Context, r *http.Request
 func (api *operationsAPI) getAcquisition(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
 	defer cancel()
-	principal, _, err := api.authorizeISPStaff(ctx, r, "isp.owner", "isp.admin", "isp.service_desk")
+	principal, _, err := api.authorizeISPStaff(ctx, r, "isp.owner", "isp.admin", "isp.support")
 	if err != nil {
 		writeOperationsError(w, err)
 		return
@@ -82,7 +82,7 @@ func (api *operationsAPI) getAcquisition(w http.ResponseWriter, r *http.Request)
 func (api *operationsAPI) getServiceOrder(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
 	defer cancel()
-	principal, _, err := api.authorizeISPStaff(ctx, r, "isp.owner", "isp.admin", "isp.service_desk")
+	principal, _, err := api.authorizeISPStaff(ctx, r, "isp.owner", "isp.admin", "isp.support")
 	if err != nil {
 		writeOperationsError(w, err)
 		return
