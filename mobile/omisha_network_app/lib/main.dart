@@ -194,6 +194,95 @@ class _OmishaAppState extends State<OmishaApp> {
     );
   }
 
+  Future<void> _openInvitationManagement() async {
+    final api = _api;
+    final session = _session;
+    if (api == null || session == null) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    List<WorkspaceInvitation> invitations;
+    try {
+      invitations = await api.listWorkspaceInvitations(session.accessToken);
+    } catch (exception) {
+      if (mounted) setState(() {
+        _busy = false;
+        _error = _safeMessage(exception);
+      });
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _busy = false);
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        var current = invitations;
+        var loading = false;
+        String? dialogError;
+        return StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: const Text('Workspace invitations'),
+            content: SizedBox(
+              width: 480,
+              height: 420,
+              child: loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : Column(
+                      children: [
+                        if (dialogError != null) _InlineError(dialogError!),
+                        Expanded(
+                          child: current.isEmpty
+                              ? const Center(child: Text('No invitations found.'))
+                              : ListView.builder(
+                                  itemCount: current.length,
+                                  itemBuilder: (context, index) {
+                                    final item = current[index];
+                                    return ListTile(
+                                      title: Text(item.roleCode),
+                                      subtitle: Text('${item.status} · expires ${item.expiresAt.toLocal()}'),
+                                      trailing: item.status == 'pending'
+                                          ? IconButton(
+                                              tooltip: 'Revoke invitation',
+                                              icon: const Icon(Icons.block_outlined),
+                                              onPressed: () async {
+                                                setDialogState(() {
+                                                  loading = true;
+                                                  dialogError = null;
+                                                });
+                                                try {
+                                                  await api.revokeWorkspaceInvitation(
+                                                    accessToken: session.accessToken,
+                                                    invitationId: item.id,
+                                                  );
+                                                  current = await api.listWorkspaceInvitations(session.accessToken);
+                                                } catch (exception) {
+                                                  dialogError = _safeMessage(exception);
+                                                } finally {
+                                                  setDialogState(() => loading = false);
+                                                }
+                                              },
+                                            )
+                                          : null,
+                                    );
+                                  },
+                                ),
+                        ),
+                      ],
+                    ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('Close'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _createInvitation() async {
     final api = _api;
     final session = _session;
@@ -504,6 +593,7 @@ class _OmishaAppState extends State<OmishaApp> {
         onSwitch: _openContextPicker,
         onLogout: _logout,
         onCreateInvitation: _canCreateInvitation ? _createInvitation : null,
+        onManageInvitations: _canCreateInvitation ? _openInvitationManagement : null,
       );
     }
     return _SignInPage(
@@ -762,6 +852,7 @@ class _WorkspacePage extends StatelessWidget {
     required this.onSwitch,
     required this.onLogout,
     required this.onCreateInvitation,
+    required this.onManageInvitations,
   });
 
   final WorkspaceContext contextInfo;
@@ -769,6 +860,7 @@ class _WorkspacePage extends StatelessWidget {
   final VoidCallback onSwitch;
   final VoidCallback onLogout;
   final VoidCallback? onCreateInvitation;
+  final VoidCallback? onManageInvitations;
 
   @override
   Widget build(BuildContext context) {
@@ -831,6 +923,17 @@ class _WorkspacePage extends StatelessWidget {
                 onPressed: onCreateInvitation,
                 icon: const Icon(Icons.person_add_alt_1),
                 label: const Text('Create invitation'),
+              ),
+            ),
+          ],
+          if (onManageInvitations != null) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: onManageInvitations,
+                icon: const Icon(Icons.manage_accounts_outlined),
+                label: const Text('Manage invitations'),
               ),
             ),
           ],
