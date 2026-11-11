@@ -144,6 +144,24 @@ class OmishaApi {
     return identityToken;
   }
 
+  Future<String> exchangeGoogleIdToken(String googleIdToken) async {
+    if (googleIdToken.length < 24 || googleIdToken.length > 8192) {
+      throw const ApiException('The Google sign-in response was invalid.');
+    }
+    final response = await _send(
+      'POST',
+      'v1/auth/social/google',
+      body: {'id_token': googleIdToken},
+    );
+    final identityToken = response['identity_token'];
+    if (identityToken is! String ||
+        identityToken.length < 24 ||
+        identityToken.length > 8192) {
+      throw const ApiException('The sign-in service response was invalid.');
+    }
+    return identityToken;
+  }
+
   Future<List<WorkspaceContext>> listContexts(String identityToken) async {
     final response = await _send('GET', 'v1/me/contexts', token: identityToken);
     final values = response['contexts'];
